@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, Send, Sparkles, Lock } from 'lucide-react'
+import { ArrowLeft, Send, Sparkles } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { usePlan } from '@/hooks/useLifeQuest'
 import { chatWithMentor } from '@/lib/ai'
+import { canUse } from '@/lib/access'
 import Paywall from '@/components/Paywall'
 import type { User } from '@/types'
 
@@ -18,8 +18,6 @@ interface Message {
 
 export default function Chat({ user }: ChatProps) {
   const navigate = useNavigate()
-  const { isPro, isTrialActive } = usePlan(user.id)
-  const canUseChat = isPro || isTrialActive
 
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -29,7 +27,6 @@ export default function Chat({ user }: ChatProps) {
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [paywallOpen, setPaywallOpen] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -38,10 +35,7 @@ export default function Chat({ user }: ChatProps) {
 
   async function handleSend() {
     if (!input.trim() || loading) return
-    if (!canUseChat) {
-      setPaywallOpen(true)
-      return
-    }
+    if (!(await canUse(user.id, 'ai_chat'))) return
 
     const userMsg: Message = { role: 'user', content: input.trim() }
     setMessages(prev => [...prev, userMsg])
@@ -60,6 +54,7 @@ export default function Chat({ user }: ChatProps) {
   }
 
   return (
+    <Paywall feature="ai_chat" userId={user.id}>
     <div className="min-h-dvh bg-background flex flex-col pb-16">
       <div className="flex items-center gap-3 px-4 pt-safe pb-4 border-b border-white/5">
         <button onClick={() => navigate(-1)} className="p-2 rounded-xl bg-white/5">
@@ -75,20 +70,6 @@ export default function Chat({ user }: ChatProps) {
           </div>
         </div>
       </div>
-
-      {!canUseChat && (
-        <motion.div
-          className="mx-4 mt-4 p-3 rounded-2xl flex items-center gap-2"
-          style={{ background: '#534AB722', border: '1px solid #534AB744' }}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-        >
-          <Lock size={14} className="text-accent" />
-          <p className="text-xs text-gray-300">
-            Чат доступен в Trial и Pro. <button onClick={() => setPaywallOpen(true)} className="text-accent underline">Разблокировать</button>
-          </p>
-        </motion.div>
-      )}
 
       <div className="flex-1 overflow-y-auto scrollbar-hide px-4 py-4 space-y-3">
         <AnimatePresence initial={false}>
@@ -138,13 +119,12 @@ export default function Chat({ user }: ChatProps) {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
-            placeholder={canUseChat ? 'Напиши сообщение...' : 'Доступно в Pro'}
-            disabled={!canUseChat}
+            placeholder="Напиши сообщение..."
             className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-accent/50 text-sm disabled:opacity-50"
           />
           <motion.button
             onClick={handleSend}
-            disabled={!input.trim() || loading || !canUseChat}
+            disabled={!input.trim() || loading}
             className="p-3 rounded-2xl disabled:opacity-40"
             style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
             whileTap={{ scale: 0.9 }}
@@ -154,13 +134,7 @@ export default function Chat({ user }: ChatProps) {
         </div>
       </div>
 
-      <Paywall
-        isOpen={paywallOpen}
-        onClose={() => setPaywallOpen(false)}
-        featureName="Чат с наставником"
-        isTrialAvailable={false}
-        onUpgrade={() => setPaywallOpen(false)}
-      />
     </div>
+    </Paywall>
   )
 }

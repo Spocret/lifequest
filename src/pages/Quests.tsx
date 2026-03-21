@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowLeft, Wand2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { useQuests, useCharacter, usePlan, useFloatingXP } from '@/hooks/useLifeQuest'
+import { useQuests, useCharacter, useFloatingXP } from '@/hooks/useLifeQuest'
 import { generateQuests } from '@/lib/ai'
+import { canUse } from '@/lib/access'
 import { supabase } from '@/lib/supabase'
 import QuestCard from '@/components/QuestCard'
 import Paywall from '@/components/Paywall'
@@ -18,13 +19,9 @@ export default function Quests({ user }: QuestsProps) {
   const navigate = useNavigate()
   const { quests, completeQuest } = useQuests(user.id)
   const { character, gainXP } = useCharacter(user.id)
-  const { isPro, isTrialActive } = usePlan(user.id)
   const { items: xpItems, show: showXP } = useFloatingXP()
 
   const [generating, setGenerating] = useState(false)
-  const [paywallOpen, setPaywallOpen] = useState(false)
-
-  const canGenerate = isPro || isTrialActive
 
   async function handleComplete(id: string) {
     const xp = await completeQuest(id)
@@ -33,10 +30,7 @@ export default function Quests({ user }: QuestsProps) {
   }
 
   async function handleGenerate() {
-    if (!canGenerate) {
-      setPaywallOpen(true)
-      return
-    }
+    if (!(await canUse(user.id, 'ai_chat'))) return
     if (!character) return
     setGenerating(true)
     try {
@@ -70,16 +64,18 @@ export default function Quests({ user }: QuestsProps) {
           <ArrowLeft size={20} />
         </button>
         <h1 className="text-xl font-bold text-white flex-1">Квесты</h1>
-        <motion.button
-          onClick={handleGenerate}
-          disabled={generating}
-          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
-          style={{ background: canGenerate ? 'linear-gradient(135deg, #534AB7, #7F77DD)' : '#534AB733', border: canGenerate ? 'none' : '1px solid #534AB766' }}
-          whileTap={{ scale: 0.95 }}
-        >
-          <Wand2 size={16} />
-          {generating ? 'Генерация...' : 'AI-квесты'}
-        </motion.button>
+        <Paywall feature="ai_chat" userId={user.id} className="!py-4 !gap-2 !max-w-[200px]">
+          <motion.button
+            onClick={handleGenerate}
+            disabled={generating}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium disabled:opacity-60 w-full"
+            style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <Wand2 size={16} />
+            {generating ? 'Генерация...' : 'AI-квесты'}
+          </motion.button>
+        </Paywall>
       </div>
 
       <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pb-8 space-y-3">
@@ -115,13 +111,6 @@ export default function Quests({ user }: QuestsProps) {
         </motion.div>
       ))}
 
-      <Paywall
-        isOpen={paywallOpen}
-        onClose={() => setPaywallOpen(false)}
-        featureName="AI-квесты"
-        isTrialAvailable={false}
-        onUpgrade={() => setPaywallOpen(false)}
-      />
     </div>
   )
 }

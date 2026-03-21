@@ -13,7 +13,14 @@ export interface Character {
   id: string
   user_id: string
   name: string
-  class: 'warrior' | 'mage' | 'rogue' | 'healer'
+  class:
+    | 'warrior'
+    | 'mage'
+    | 'rogue'
+    | 'healer'
+    | 'athlete'
+    | 'scholar'
+    | 'entrepreneur'
   avatar_url: string | null
   avatar_state: 'hidden' | 'silhouette' | 'revealed'
   level: number
@@ -91,22 +98,7 @@ export interface ReferralStats {
   bonusDays: number
 }
 
-export type FeatureKey =
-  | 'journal'
-  | 'ai_journal'
-  | 'habits'
-  | 'quests'
-  | 'ai_quests'
-  | 'chat'
-  | 'weekly_insight'
-  | 'referral'
-
-export interface PlanStatus {
-  plan: 'free' | 'trial' | 'pro'
-  isTrialExpired: boolean
-  daysLeft: number
-  features: Record<FeatureKey, boolean>
-}
+export type { FeatureKey, PlanStatus } from '@/lib/access'
 
 export type Sphere = 'mind' | 'body' | 'spirit' | 'resource'
 

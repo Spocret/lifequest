@@ -1,104 +1,92 @@
-import { motion, AnimatePresence } from 'framer-motion'
-import { X, Zap, Star, Shield, MessageCircle } from 'lucide-react'
+import { type ReactNode, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { canUse, type FeatureKey } from '@/lib/access'
 
-interface PaywallProps {
-  isOpen: boolean
-  onClose: () => void
-  featureName?: string
-  onStartTrial?: () => void
-  onUpgrade?: () => void
-  isTrialAvailable?: boolean
+const FEATURE_TITLES: Record<FeatureKey, string> = {
+  journal_entry: 'Записи в дневнике',
+  habit_add: 'Новые привычки',
+  ai_chat: 'ИИ-наставник',
+  weekly_insight: 'Еженедельный инсайт',
+  history: 'Полная история',
 }
 
-const PRO_FEATURES = [
-  { icon: Zap, text: 'AI-анализ дневниковых записей' },
-  { icon: Star, text: 'Персонализированные квесты от ИИ' },
-  { icon: MessageCircle, text: 'Чат с ИИ-наставником' },
-  { icon: Shield, text: 'Еженедельные инсайты и аналитика' },
-]
-
-export default function Paywall({
-  isOpen,
-  onClose,
-  featureName,
-  onStartTrial,
-  onUpgrade,
-  isTrialAvailable = false,
-}: PaywallProps) {
+function LockIcon() {
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          <motion.div
-            className="fixed inset-0 bg-black/70 z-40 backdrop-blur-sm"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-          />
-          <motion.div
-            className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl p-6"
-            style={{ background: '#12121f', border: '1px solid rgba(255,255,255,0.1)' }}
-            initial={{ y: '100%' }}
-            animate={{ y: 0 }}
-            exit={{ y: '100%' }}
-            transition={{ type: 'spring', damping: 25 }}
-          >
-            <button
-              onClick={onClose}
-              className="absolute top-4 right-4 p-2 rounded-full bg-white/10"
-            >
-              <X size={18} />
-            </button>
+    <svg
+      width="48"
+      height="48"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className="text-accent"
+      aria-hidden
+    >
+      <path
+        d="M7 11V8a5 5 0 0 1 10 0v3"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <rect
+        x="5"
+        y="11"
+        width="14"
+        height="10"
+        rx="2"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <circle cx="12" cy="16" r="1" fill="currentColor" />
+    </svg>
+  )
+}
 
-            <div className="text-center mb-6">
-              <div className="text-4xl mb-3">⚔️</div>
-              <h2 className="text-xl font-bold text-white mb-2">
-                {featureName ? `${featureName} — Pro` : 'Разблокируй LifeQuest Pro'}
-              </h2>
-              <p className="text-gray-400 text-sm">
-                Получи доступ ко всем возможностям ИИ-наставника
-              </p>
-            </div>
+interface PaywallProps {
+  feature: FeatureKey
+  userId: string
+  children: ReactNode
+  /** Applied to the blocked-state panel (e.g. compact header slot). */
+  className?: string
+}
 
-            <div className="space-y-3 mb-6">
-              {PRO_FEATURES.map(({ icon: Icon, text }) => (
-                <div key={text} className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
-                    <Icon size={16} className="text-accent" />
-                  </div>
-                  <span className="text-sm text-gray-300">{text}</span>
-                </div>
-              ))}
-            </div>
+export default function Paywall({ feature, userId, children, className }: PaywallProps) {
+  const [allowed, setAllowed] = useState<boolean | null>(null)
 
-            <div className="space-y-3">
-              {isTrialAvailable && onStartTrial && (
-                <motion.button
-                  onClick={onStartTrial}
-                  className="w-full py-4 rounded-2xl font-semibold text-white"
-                  style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
-                  whileTap={{ scale: 0.97 }}
-                >
-                  Начать 5-дневный пробный период
-                </motion.button>
-              )}
-              {onUpgrade && (
-                <motion.button
-                  onClick={onUpgrade}
-                  className="w-full py-4 rounded-2xl font-semibold border border-accent/40 text-accent"
-                  whileTap={{ scale: 0.97 }}
-                >
-                  Подключить Pro — 490 ₽/мес
-                </motion.button>
-              )}
-              <button onClick={onClose} className="w-full py-3 text-sm text-gray-500">
-                Остаться на бесплатном
-              </button>
-            </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+  useEffect(() => {
+    let cancelled = false
+    canUse(userId, feature).then(ok => {
+      if (!cancelled) setAllowed(ok)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [userId, feature])
+
+  if (allowed === null) {
+    return <div className="relative">{children}</div>
+  }
+
+  if (allowed) {
+    return <>{children}</>
+  }
+
+  return (
+    <div
+      className={`relative flex flex-col items-center justify-center gap-3 px-4 py-8 rounded-3xl text-center max-w-sm mx-auto ${className ?? ''}`}
+      style={{ background: '#12121f', border: '1px solid rgba(255,255,255,0.1)' }}
+    >
+      <LockIcon />
+      <h2 className="text-lg font-semibold text-white">{FEATURE_TITLES[feature]}</h2>
+      <p className="text-sm text-gray-400 italic max-w-xs leading-relaxed">
+        Эта часть пути открыта тем кто продолжает
+      </p>
+      <Link
+        to="/upgrade"
+        className="mt-2 w-full max-w-xs py-3.5 rounded-2xl font-semibold text-white text-center"
+        style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
+      >
+        ✦ Открыть Pro 490 ₽/мес
+      </Link>
+    </div>
   )
 }

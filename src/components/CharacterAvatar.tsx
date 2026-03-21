@@ -14,6 +14,9 @@ const CLASS_COLORS: Record<Character['class'], string> = {
   mage: '#7F77DD',
   rogue: '#22c55e',
   healer: '#f59e0b',
+  athlete: '#22c55e',
+  scholar: '#7F77DD',
+  entrepreneur: '#2196F3',
 }
 
 const CLASS_ICONS: Record<Character['class'], string> = {
@@ -21,6 +24,9 @@ const CLASS_ICONS: Record<Character['class'], string> = {
   mage: '🔮',
   rogue: '🗡️',
   healer: '✨',
+  athlete: '💪',
+  scholar: '📖',
+  entrepreneur: '💼',
 }
 
 export default function CharacterAvatar({ character, size = 'md', className = '' }: CharacterAvatarProps) {
