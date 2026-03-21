@@ -68,7 +68,8 @@ export async function initTelegramAuth(): Promise<AuthResult> {
   let user: User
 
   if (!existing) {
-    // Brand new user — insert with trial.
+    // Brand new user — insert core fields first (avoids schema cache issues
+    // with columns added via ALTER TABLE).
     const { data, error } = await supabase
       .from('users')
       .insert({
@@ -76,14 +77,19 @@ export async function initTelegramAuth(): Promise<AuthResult> {
         tg_username: tgUser.username ?? null,
         plan: 'trial',
         trial_end: trialEnd,
-        referral_code: referralCode,
-        referred_by: null,
       })
       .select()
       .single()
 
     if (error) throw new Error(`User insert failed: ${error.message}`)
     user = data as User
+
+    // Back-fill referral_code and referred_by separately so a stale
+    // PostgREST schema cache on the insert path doesn't block signup.
+    await supabase
+      .from('users')
+      .update({ referral_code: referralCode, referred_by: null })
+      .eq('id', user.id)
   } else {
     // Existing user — only sync the Telegram username.
     if (existing.tg_username !== (tgUser.username ?? null)) {
