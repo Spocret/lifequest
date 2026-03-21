@@ -5,6 +5,8 @@ interface TelegramWebApp {
   setHeaderColor(color: string): void
   setBackgroundColor(color: string): void
   openTelegramLink?(url: string): void
+  version: string
+  platform: string
   colorScheme: 'light' | 'dark'
   isExpanded: boolean
   /** Raw URL-encoded init data string — the most reliable Telegram context signal. */
