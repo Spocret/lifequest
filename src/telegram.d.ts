@@ -1,3 +1,10 @@
+interface TelegramSafeAreaInset {
+  top: number
+  bottom: number
+  left: number
+  right: number
+}
+
 interface TelegramWebApp {
   ready(): void
   expand(): void
@@ -5,6 +12,8 @@ interface TelegramWebApp {
   setHeaderColor(color: string): void
   setBackgroundColor(color: string): void
   openTelegramLink?(url: string): void
+  onEvent?(eventType: string, eventHandler: () => void): void
+  offEvent?(eventType: string, eventHandler: () => void): void
   version: string
   platform: string
   colorScheme: 'light' | 'dark'
@@ -20,6 +29,10 @@ interface TelegramWebApp {
     }
     start_param?: string
   }
+  /** Safe area inset from the device (notch, status bar). Available since Bot API 7.7. */
+  safeAreaInset?: TelegramSafeAreaInset
+  /** Safe area inset for content inside the Telegram UI (header, etc.). Available since Bot API 8.0. */
+  contentSafeAreaInset?: TelegramSafeAreaInset
   HapticFeedback?: {
     impactOccurred(style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft'): void
     notificationOccurred(type: 'error' | 'success' | 'warning'): void

@@ -60,8 +60,8 @@ export default function Chat({ user }: ChatProps) {
   }
 
   return (
-    <div className="min-h-dvh bg-background flex flex-col">
-      <div className="flex items-center gap-3 px-4 pt-6 pb-4 border-b border-white/5">
+    <div className="min-h-dvh bg-background flex flex-col pb-16">
+      <div className="flex items-center gap-3 px-4 pt-safe pb-4 border-b border-white/5">
         <button onClick={() => navigate(-1)} className="p-2 rounded-xl bg-white/5">
           <ArrowLeft size={20} />
         </button>

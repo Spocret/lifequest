@@ -95,6 +95,15 @@ function AppRoutes() {
       tg.expand()
       tg.setHeaderColor('#0a0a14')
       tg.setBackgroundColor('#0a0a14')
+
+      const applySafeArea = () => {
+        const top =
+          (tg.contentSafeAreaInset?.top ?? 0) + (tg.safeAreaInset?.top ?? 0)
+        document.documentElement.style.setProperty('--app-safe-top', `${top}px`)
+      }
+      applySafeArea()
+      tg.onEvent?.('safeAreaChanged', applySafeArea)
+      tg.onEvent?.('viewportChanged', applySafeArea)
     }
 
     initTelegramAuth()

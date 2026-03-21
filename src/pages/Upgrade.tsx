@@ -37,7 +37,7 @@ export default function Upgrade({ user }: UpgradeProps) {
   return (
     <div className="min-h-dvh bg-background flex flex-col pb-24">
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 pt-6 pb-4">
+      <div className="flex items-center gap-3 px-4 pt-safe pb-4">
         <motion.button
           onClick={() => navigate(-1)}
           className="p-2 rounded-xl"

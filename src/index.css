@@ -4,6 +4,8 @@
 
 :root {
   --tg-viewport-height: 100vh;
+  /* Set by JS from tg.contentSafeAreaInset.top after Telegram WebApp init */
+  --app-safe-top: 0px;
 }
 
 * {
@@ -27,5 +29,9 @@ body {
   }
   .safe-bottom {
     padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  /* Top padding that accounts for Telegram header + breathing room */
+  .pt-safe {
+    padding-top: calc(var(--app-safe-top) + 24px);
   }
 }
