@@ -7,6 +7,8 @@ interface TelegramWebApp {
   openTelegramLink?(url: string): void
   colorScheme: 'light' | 'dark'
   isExpanded: boolean
+  /** Raw URL-encoded init data string — the most reliable Telegram context signal. */
+  initData: string
   initDataUnsafe: {
     user?: {
       id: number

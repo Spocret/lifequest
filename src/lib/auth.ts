@@ -28,7 +28,24 @@ function extractRefCode(): string | null {
 export async function initTelegramAuth(): Promise<AuthResult> {
   // ── Step 1: require Telegram context ──────────────────────────
   const tg = window.Telegram?.WebApp
-  const tgUser = tg?.initDataUnsafe?.user
+
+  // initData (raw string) is the most reliable signal we're inside a Mini App.
+  // initDataUnsafe.user can be undefined on some mobile Telegram versions even
+  // when the app is genuinely open as a Mini App, so we fall back to parsing
+  // the raw initData string ourselves.
+  if (!tg?.initData) throw new Error('Not in Telegram')
+
+  let tgUser = tg.initDataUnsafe?.user
+  if (!tgUser) {
+    try {
+      const params = new URLSearchParams(tg.initData)
+      const userJson = params.get('user')
+      if (userJson) tgUser = JSON.parse(userJson)
+    } catch {
+      // malformed initData — still not a valid Telegram context
+    }
+  }
+
   if (!tgUser) throw new Error('Not in Telegram')
 
   // ── Step 2: save referral code to sessionStorage ───────────────
