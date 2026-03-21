@@ -113,11 +113,20 @@ export async function initTelegramAuth(): Promise<AuthResult> {
   let character: Character
 
   if (!existingChar) {
-    // Create a placeholder — Onboarding will fill in name & class.
+    // Insert only user_id first to sidestep PostgREST schema cache lag,
+    // then back-fill the remaining columns via UPDATE.
     const { data, error } = await supabase
       .from('characters')
-      .insert({
-        user_id: user.id,
+      .insert({ user_id: user.id })
+      .select()
+      .single()
+
+    if (error) throw new Error(`Character insert failed: ${error.message}`)
+    character = data as Character
+
+    await supabase
+      .from('characters')
+      .update({
         name: '',
         class: 'warrior',
         avatar_state: 'hidden',
@@ -129,11 +138,7 @@ export async function initTelegramAuth(): Promise<AuthResult> {
         resource: 10,
         last_active: new Date().toISOString(),
       })
-      .select()
-      .single()
-
-    if (error) throw new Error(`Character insert failed: ${error.message}`)
-    character = data as Character
+      .eq('id', character.id)
   } else {
     character = existingChar as Character
   }
