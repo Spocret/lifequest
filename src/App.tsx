@@ -40,12 +40,29 @@ function LoadingScreen() {
   )
 }
 
-function ErrorScreen() {
+function ErrorScreen({ message }: { message?: string }) {
+  const tg = window.Telegram?.WebApp
+  const debug = {
+    tgExists: !!window.Telegram,
+    webAppExists: !!tg,
+    initData: tg?.initData ?? '(none)',
+    user: tg?.initDataUnsafe?.user ?? '(none)',
+    version: tg?.version ?? '(none)',
+    platform: tg?.platform ?? '(none)',
+  }
   return (
-    <div className="min-h-dvh bg-background flex flex-col items-center justify-center px-6 text-center">
+    <div className="min-h-dvh bg-background flex flex-col items-center justify-center px-4 text-center">
       <div className="text-5xl mb-4">🛡️</div>
-      <h2 className="text-xl font-bold text-white mb-2">Открой в Telegram</h2>
-      <p className="text-gray-400 text-sm">LifeQuest работает только как Telegram Mini App.</p>
+      <h2 className="text-xl font-bold text-white mb-2">Ошибка авторизации</h2>
+      <p className="text-gray-400 text-sm mb-6">{message}</p>
+      <div className="w-full bg-gray-900 rounded-xl p-4 text-left text-xs text-gray-300 font-mono break-all space-y-1">
+        {Object.entries(debug).map(([k, v]) => (
+          <div key={k}>
+            <span className="text-yellow-400">{k}:</span>{' '}
+            {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -88,7 +105,7 @@ function AppRoutes() {
   }, [])
 
   if (auth.status === 'loading') return <LoadingScreen />
-  if (auth.status === 'error') return <ErrorScreen />
+  if (auth.status === 'error') return <ErrorScreen message={auth.message} />
 
   const { user, character } = auth.result
   // Character is "ready" once onboarding is complete (avatar_state leaves 'hidden')
