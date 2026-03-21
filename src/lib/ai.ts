@@ -20,6 +20,40 @@ export interface Message {
 
 type ChatMessage = { role: string; content: string }
 
+/** OpenRouter may return string content, array parts, or reasoning-only. */
+function extractChoiceContent(data: unknown): string {
+  if (!data || typeof data !== 'object') return ''
+  const d = data as Record<string, unknown>
+  const choice = (d.choices as unknown[])?.[0] as Record<string, unknown> | undefined
+  const message = choice?.message as Record<string, unknown> | undefined
+  if (!message) return ''
+  const c = message.content
+  if (typeof c === 'string') return c
+  if (Array.isArray(c)) {
+    return c
+      .map((part: unknown) => {
+        if (typeof part === 'object' && part !== null && 'text' in part) {
+          return String((part as { text?: string }).text ?? '')
+        }
+        return ''
+      })
+      .join('')
+  }
+  if (typeof message.reasoning === 'string') return message.reasoning
+  return ''
+}
+
+const CHAT_MODELS = [
+  'google/gemini-2.0-flash-exp:free',
+  'meta-llama/llama-3.3-70b-instruct:free',
+  'google/gemini-flash-1.5',
+  'deepseek/deepseek-chat:free',
+]
+
+const MENTOR_SYSTEM = `Ты — мудрый наставник и коуч в RPG-приложении LifeQuest. 
+Помогаешь развиваться в сферах разума, тела, духа и ресурсов. 
+Отвечай кратко, вдохновляюще, с элементами RPG-нарратива. Язык: русский.`
+
 function buildHeaders() {
   return {
     Authorization: `Bearer ${KEY}`,
@@ -41,14 +75,37 @@ async function streamRequest(model: string, messages: ChatMessage[]): Promise<Re
 }
 
 async function jsonRequest(model: string, messages: ChatMessage[], maxTokens = 500): Promise<string> {
+  if (!KEY || String(KEY).trim() === '' || KEY === 'undefined') {
+    throw new Error('VITE_OPENROUTER_KEY is not set')
+  }
   const res = await fetch(`${BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: buildHeaders(),
     body: JSON.stringify({ model, max_tokens: maxTokens, messages }),
   })
-  if (!res.ok) throw new Error(`AI error: ${res.status}`)
+  if (!res.ok) {
+    const errText = await res.text()
+    throw new Error(`AI error: ${res.status} ${errText.slice(0, 400)}`)
+  }
   const data = await res.json()
-  return data.choices?.[0]?.message?.content ?? ''
+  return extractChoiceContent(data)
+}
+
+async function jsonRequestWithModelsFallback(
+  models: string[],
+  messages: ChatMessage[],
+  maxTokens: number,
+): Promise<string> {
+  let lastErr: Error | null = null
+  for (const model of models) {
+    try {
+      const text = await jsonRequest(model, messages, maxTokens)
+      if (text.trim()) return text
+    } catch (e) {
+      lastErr = e instanceof Error ? e : new Error(String(e))
+    }
+  }
+  throw lastErr ?? new Error('All chat models failed')
 }
 
 // ── New streaming functions ────────────────────────────────────────────────
@@ -169,20 +226,29 @@ export async function chatWithMentor(
   history: Message[],
   userMessage: string,
 ): Promise<string> {
-  return jsonRequest(
-    MODELS.gemini,
-    [
-      {
-        role: 'system',
-        content: `Ты — мудрый наставник и коуч в RPG-приложении LifeQuest. 
-Помогаешь развиваться в сферах разума, тела, духа и ресурсов. 
-Отвечай кратко, вдохновляюще, с элементами RPG-нарратива. Язык: русский.`,
-      },
-      ...history,
-      { role: 'user', content: userMessage },
-    ],
-    500,
-  )
+  const messages: ChatMessage[] = [
+    { role: 'system', content: MENTOR_SYSTEM },
+    ...history.map(m => ({ role: m.role, content: m.content })),
+    { role: 'user', content: userMessage },
+  ]
+
+  if (import.meta.env.PROD) {
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages, max_tokens: 500 }),
+      })
+      if (res.ok) {
+        const data = (await res.json()) as { content?: string }
+        if (data.content?.trim()) return data.content
+      }
+    } catch {
+      // try direct OpenRouter from client
+    }
+  }
+
+  return jsonRequestWithModelsFallback(CHAT_MODELS, messages, 500)
 }
 
 export async function generateWeeklyInsight(entriesSummary: string): Promise<string> {
