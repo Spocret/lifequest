@@ -29,14 +29,13 @@ export async function initTelegramAuth(): Promise<AuthResult> {
   // ── Step 1: require Telegram context ──────────────────────────
   const tg = window.Telegram?.WebApp
 
-  // initData (raw string) is the most reliable signal we're inside a Mini App.
-  // initDataUnsafe.user can be undefined on some mobile Telegram versions even
-  // when the app is genuinely open as a Mini App, so we fall back to parsing
-  // the raw initData string ourselves.
-  if (!tg?.initData) throw new Error('Not in Telegram')
+  // Presence of the WebApp object is the reliable signal we're inside a Mini App.
+  // On some iOS Telegram versions initData is empty even in a real Mini App context,
+  // so we do NOT gate on initData — we only require the WebApp object itself.
+  if (!tg) throw new Error('Not in Telegram')
 
   let tgUser = tg.initDataUnsafe?.user
-  if (!tgUser) {
+  if (!tgUser && tg.initData) {
     try {
       const params = new URLSearchParams(tg.initData)
       const userJson = params.get('user')
