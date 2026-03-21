@@ -1,0 +1,324 @@
+# LifeQuest — Cursor Rules
+
+## Project
+Telegram Mini App RPG for personal growth. React + Vite + TypeScript + Tailwind + Supabase + OpenRouter AI.
+NOT Next.js. NO server components. NO SSR. Pure client-side SPA that runs inside Telegram WebApp.
+
+## Stack
+- React 18 + Vite + TypeScript (strict)
+- Tailwind CSS (dark theme only)
+- Supabase JS client (browser only, @supabase/supabase-js)
+- Framer Motion for animations
+- React Router v6 for navigation
+- OpenRouter API for AI (not OpenAI directly)
+
+## TypeScript
+- Always use TypeScript. No `any` types ever.
+- Prefer interfaces over types for objects.
+- Use functional components only. No class components.
+- Use `function` keyword for components, not `const arrow`.
+- Descriptive variable names: isLoading, hasError, canUseChat.
+
+## Code style
+- No semicolons.
+- Early returns for error conditions — no deeply nested if/else.
+- All async functions wrapped in try/catch.
+- Favor simplicity over cleverness.
+- Mobile-first always (Telegram Mini App = phone screen).
+
+## Folder structure (strict)
+```
+src/
+  lib/          ← ALL external calls go here only
+    supabase.ts   ← Supabase client
+    ai.ts         ← OpenRouter API functions
+    access.ts     ← Plan-based feature gating
+    referral.ts   ← Referral system
+    auth.ts       ← Telegram WebApp auth
+  pages/        ← Full page components
+  components/   ← Reusable UI components
+  types/        ← TypeScript interfaces
+api/
+  cron/         ← Vercel cron jobs
+  bot/          ← Telegram bot webhook
+```
+
+NEVER put Supabase queries or fetch calls directly in components.
+ALWAYS use functions from src/lib/ in components.
+
+## Supabase
+- Use @supabase/supabase-js browser client only (no SSR, no @supabase/ssr).
+- Always handle errors: `const { data, error } = await supabase.from(...)`.
+- Check error before using data.
+- Use VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY from env (not NEXT_PUBLIC_).
+
+## Design — ALWAYS dark theme
+- Background: #0a0a14
+- Cards/surfaces: #111122
+- Borders: #1a1a2e
+- Primary: #534AB7 (purple)
+- Accent: #7F77DD
+- Success: #1D9E75
+- Warning: #EF9F27
+- Text primary: #ffffff
+- Text secondary: #aaaaaa
+- Text muted: #555566
+- NO white backgrounds. NO light mode. EVER.
+
+## Tailwind
+- Use Tailwind for all styling.
+- Custom colors configured in tailwind.config: primary, accent, dark bg.
+- Mobile-first: start with base styles, add sm:/md: for larger screens.
+- Safe area padding for iPhone: pb-safe, pt-safe.
+
+## Animations
+- Use Framer Motion for: character reveal, XP gain popups, level up, page transitions.
+- CSS transitions for: hover states, button presses, tab switches.
+- Keep animations under 400ms for interactions, under 1500ms for reveals.
+
+## LifeQuest domain — naming is strict
+- AI mentor = "Архитектор" (never "AI", "bot", "assistant", "chatbot")
+- The enemy = "Тень" (never "shadow enemy" or similar)
+- Character stats: mind, body, spirit, resource (never "stats array" or generic names)
+- Plans: 'trial' | 'free' | 'pro' (these exact strings, checked via access.ts)
+- Spheres: 'mind' | 'body' | 'spirit' | 'resource'
+- Quest ranks: 'F' | 'E' | 'D' | 'C' | 'B' | 'A' | 'S'
+- Never call it "diary app" or "habit tracker" — it's an RPG
+
+## Feature access — always use access.ts
+```typescript
+// CORRECT
+const allowed = await canUse(userId, 'ai_chat')
+if (!allowed) return <Paywall feature="ai_chat" />
+
+// WRONG — never hardcode plan checks in components
+if (user.plan === 'free') return <div>Upgrade</div>
+```
+
+## AI calls — always use ai.ts
+```typescript
+// CORRECT
+import { askQuestion } from '@/lib/ai'
+const stream = await askQuestion(entry, context)
+
+// WRONG — never call OpenRouter directly in components
+const res = await fetch('https://openrouter.ai/api/v1/...')
+```
+
+## Telegram Mini App
+- Always check window.Telegram?.WebApp before using TG APIs.
+- Use Telegram.WebApp.themeParams for colors when available.
+- Bottom navigation must account for safe area (Telegram bottom bar).
+- All modals and overlays must work within TG WebApp frame (no position:fixed full-screen).
+- Test on mobile viewport (375px width minimum).
+
+## Components
+- Every page has a loading state and error state.
+- Use skeleton loaders, not spinners where possible.
+- Empty states have a message and a CTA action.
+- Paywall component wraps any Pro-only feature.
+- XP gain always shows floating animation (+50 XP, +3 Дух).
+
+## When building a new page, always:
+1. Check if any feature on this page needs canUse() gating
+2. Add loading + error states for all async data
+3. Use dark theme colors (no white/light backgrounds)
+4. Make it work on 375px mobile width
+5. Add safe area padding at bottom for Telegram
+
+# LifeQuest — Agent & Subagent Rules
+
+## Core principle
+For ANY task longer than ~30 lines of code, break it into subtasks
+and delegate each to a specialized subagent with a clear role.
+Never try to do everything in one giant response.
+
+## How to delegate
+Before writing code, output a plan:
+```
+Task: [what user asked]
+Subagents needed:
+  1. [Role] → [specific output]
+  2. [Role] → [specific output]
+  ...
+Starting with subagent 1...
+```
+
+---
+
+## Subagent roles — use exactly these when relevant
+
+### 🗄 DATABASE AGENT
+Role: "You are a Supabase database expert."
+Responsibilities:
+- Write all SQL migrations and table definitions
+- Design RLS policies
+- Write Supabase query functions in src/lib/supabase.ts
+- Optimize queries, add indexes
+- NEVER touches UI or business logic
+Output: SQL files + TypeScript functions in src/lib/
+
+### 🤖 AI AGENT
+Role: "You are an OpenRouter API integration expert."
+Responsibilities:
+- Write all functions in src/lib/ai.ts
+- Design system prompts for Архитектор
+- Handle streaming responses
+- Implement fallback logic between models
+- NEVER touches UI or database directly
+Output: src/lib/ai.ts functions only
+
+### 🎨 UI AGENT
+Role: "You are a React UI expert building dark-themed Telegram Mini Apps."
+Responsibilities:
+- Build React components and pages
+- Apply dark theme (#0a0a14 bg, #534AB7 primary)
+- Make everything mobile-first (375px)
+- Use Tailwind only, no inline styles except dynamic values
+- NEVER writes business logic or API calls — imports from src/lib/ only
+Output: src/components/ and src/pages/ files
+
+### ✨ ANIMATION AGENT
+Role: "You are a Framer Motion animation expert."
+Responsibilities:
+- Character reveal animation
+- XP gain floating text (+50 XP)
+- Level up celebration sequence
+- Page transition animations
+- Stat bar fill animations
+- ONLY adds motion to existing components, doesn't create new ones
+Output: animation variants and motion components
+
+### 🔐 ACCESS AGENT
+Role: "You are a feature-gating and monetization logic expert."
+Responsibilities:
+- Maintain src/lib/access.ts
+- Implement canUse() checks for all features
+- Build Paywall component
+- Handle trial/free/pro plan transitions
+- Write cron jobs for trial expiry
+- NEVER touches UI design
+Output: src/lib/access.ts + src/components/Paywall.tsx
+
+### 📨 NOTIFICATION AGENT
+Role: "You are a Telegram Bot API expert."
+Responsibilities:
+- Write all bot message functions
+- Design notification texts in Архитектор voice
+- Handle webhook routing
+- Write cron job logic for degradation and insights
+- NEVER touches frontend code
+Output: api/bot/ and api/cron/ files
+
+### 🔗 REFERRAL AGENT
+Role: "You are a referral system and growth mechanics expert."
+Responsibilities:
+- Maintain src/lib/referral.ts
+- Build /referral page
+- Handle milestone rewards
+- NEVER touches unrelated features
+Output: src/lib/referral.ts + src/pages/ReferralPage.tsx
+
+---
+
+## Task routing — which agent handles what
+
+| User asks for... | Primary agent | Secondary |
+|---|---|---|
+| New page (Dashboard, Journal, etc.) | UI AGENT | ACCESS AGENT |
+| Database table or query | DATABASE AGENT | — |
+| AI response / Архитектор message | AI AGENT | — |
+| Animation / character reveal | ANIMATION AGENT | UI AGENT |
+| Payment / plan logic | ACCESS AGENT | DATABASE AGENT |
+| Bot message / notification | NOTIFICATION AGENT | — |
+| Referral feature | REFERRAL AGENT | DATABASE AGENT |
+| New feature end-to-end | All agents sequentially | — |
+
+---
+
+## Sequential build order for a new feature
+
+When asked to build something end-to-end, always follow this order:
+1. DATABASE AGENT — create/update tables, write query functions
+2. AI AGENT — add AI functions if needed
+3. ACCESS AGENT — add feature gating if needed
+4. UI AGENT — build the page/component using lib/ functions
+5. ANIMATION AGENT — add motion if the feature has visual moments
+6. NOTIFICATION AGENT — add bot messages if the feature triggers notifications
+
+Never skip steps. Never combine agents.
+
+---
+
+## Subagent prompt template
+
+When starting a subagent task, begin with:
+
+```
+[SUBAGENT: {ROLE NAME}]
+Context: LifeQuest Telegram Mini App RPG.
+Stack: React + Vite + TypeScript + Tailwind + Supabase + OpenRouter.
+Your job: {specific responsibility}
+Input: {what you have}
+Output: {exactly what file/function to produce}
+Constraints: {what NOT to do}
+---
+```
+
+Example:
+```
+[SUBAGENT: UI AGENT]
+Context: LifeQuest Telegram Mini App RPG.
+Stack: React + Vite + TypeScript + Tailwind + Supabase + OpenRouter.
+Your job: Build the /journal/new page.
+Input: journal_entries table exists. askQuestion() is in src/lib/ai.ts. canUse() is in src/lib/access.ts.
+Output: src/pages/NewEntryPage.tsx — full working component.
+Constraints: No API calls in component. No white backgrounds. Mobile-first 375px. Import everything from src/lib/.
+---
+```
+
+---
+
+## Quality checks after each subagent
+
+After every subagent output, verify:
+- [ ] TypeScript: no `any` types
+- [ ] No direct fetch/supabase calls in UI components
+- [ ] Dark theme colors used (#0a0a14, #111122, #534AB7)
+- [ ] Loading and error states present
+- [ ] Mobile viewport compatible
+- [ ] Naming matches domain (Архитектор not "AI", mind/body/spirit/resource)
+
+If check fails → fix before moving to next subagent.
+
+---
+
+## Don'ts
+- Never write a 200-line component in one shot without subagents
+- Never let UI agent touch database
+- Never let database agent design UI
+- Never skip the sequential build order
+- Never merge two agent roles into one ("UI + database agent") — they stay separate
+
+## Hooks — always use, never rewrite
+
+All data fetching hooks are in src/hooks/useLifeQuest.ts.
+ALWAYS import from there. NEVER write useEffect+supabase directly in components.
+
+Available hooks:
+- useTelegramUser()        → current user auth
+- useCharacter(userId)     → character data, gainXP(), revealCharacter()
+- useXPProgress(xp, level) → progress bar percentage, xpToNext
+- useJournal(userId)       → entries, addEntry(), isFirstEntry, monthlyCount
+- useHabits(userId)        → habits, toggleHabit(), addHabit(), weekProgress
+- useQuests(userId)        → quests, completeQuest(), activeCount
+- usePlan(userId)          → isTrialActive, isPro, isFree, daysLeft
+- useFeatureAccess(userId, feature) → boolean, use before any gated action
+- useReferral(userId)      → referral stats
+- useDegradationWarning(lastActive) → stage 0-4, warning text
+- useFloatingXP()          → show(amount, label) for XP animations
+- useTelegramTheme()       → haptic.success(), haptic.error(), expand()
+- useCountUp(target)       → animated number counter
+- useDebounce(value)       → debounced input value
+
+When building any page: first line of component = import needed hooks.
