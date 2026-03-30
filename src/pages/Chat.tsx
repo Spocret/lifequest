@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { useVisualViewportInset } from '@/hooks/useVisualViewportInset'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowLeft, Send, Sparkles } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
@@ -18,6 +19,7 @@ interface Message {
 
 export default function Chat({ user }: ChatProps) {
   const navigate = useNavigate()
+  const { bottomInset } = useVisualViewportInset()
 
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -112,7 +114,12 @@ export default function Chat({ user }: ChatProps) {
         <div ref={bottomRef} />
       </div>
 
-      <div className="px-4 pb-6 pt-3 border-t border-white/5">
+      <div
+        className="px-4 pt-3 border-t border-white/5"
+        style={{
+          paddingBottom: `calc(${bottomInset}px + 1.5rem + env(safe-area-inset-bottom, 0px))`,
+        }}
+      >
         <div className="flex gap-2">
           <input
             type="text"

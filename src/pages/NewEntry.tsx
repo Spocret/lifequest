@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useVisualViewportInset } from '@/hooks/useVisualViewportInset'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { ArrowLeft, Send } from 'lucide-react'
@@ -11,6 +12,7 @@ interface NewEntryProps {
 
 export default function NewEntry({ user }: NewEntryProps) {
   const navigate = useNavigate()
+  const { bottomInset } = useVisualViewportInset()
   const [content, setContent] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -30,7 +32,7 @@ export default function NewEntry({ user }: NewEntryProps) {
   }
 
   return (
-    <div className="min-h-dvh bg-background flex flex-col pb-24">
+    <div className="min-h-dvh bg-background flex flex-col min-h-0 pb-24">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 pt-safe pb-4">
         <motion.button
@@ -45,9 +47,9 @@ export default function NewEntry({ user }: NewEntryProps) {
       </div>
 
       {/* Text area */}
-      <div className="flex-1 px-4">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4">
         <textarea
-          className="w-full h-64 rounded-2xl p-4 text-white placeholder-gray-600 resize-none outline-none text-sm leading-relaxed transition-colors"
+          className="w-full min-h-[12rem] rounded-2xl p-4 text-white placeholder-gray-600 resize-none outline-none text-sm leading-relaxed transition-colors"
           style={{
             background: 'rgba(255,255,255,0.05)',
             border: '1px solid rgba(255,255,255,0.08)',
@@ -62,7 +64,12 @@ export default function NewEntry({ user }: NewEntryProps) {
       </div>
 
       {/* Submit */}
-      <div className="px-4 pb-4">
+      <div
+        className="flex-shrink-0 px-4"
+        style={{
+          paddingBottom: `calc(${bottomInset}px + 1rem + env(safe-area-inset-bottom, 0px))`,
+        }}
+      >
         <motion.button
           onClick={handleSubmit}
           disabled={!content.trim() || saving}

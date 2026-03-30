@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowLeft, Plus, Flame, Check, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useVisualViewportInset } from '@/hooks/useVisualViewportInset'
 import { useHabits, useCharacter, useFloatingXP } from '@/hooks/useLifeQuest'
 import { SPHERE_COLORS } from '@/types'
 import type { User } from '@/types'
@@ -15,6 +16,7 @@ const SPHERE_LABELS = { mind: 'Разум', body: 'Тело', spirit: 'Дух', 
 
 export default function Habits({ user }: HabitsProps) {
   const navigate = useNavigate()
+  const { bottomInset, height: vvHeight } = useVisualViewportInset()
   const { habits, todayLogs, toggleHabit, addHabit, weekProgress } = useHabits(user.id)
   const { gainXP } = useCharacter(user.id)
   const { items: xpItems, show: showXP } = useFloatingXP()
@@ -136,59 +138,70 @@ export default function Habits({ user }: HabitsProps) {
         {showAdd && (
           <>
             <motion.div
-              className="fixed inset-0 bg-black/60 z-40"
+              className="fixed inset-0 bg-black/60 z-[60]"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setShowAdd(false)}
             />
             <motion.div
-              className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl p-6"
-              style={{ background: '#12121f', border: '1px solid rgba(255,255,255,0.1)' }}
+              className="fixed left-0 right-0 z-[70] rounded-t-3xl flex flex-col min-h-0"
+              style={{
+                bottom: bottomInset,
+                maxHeight: Math.max(0, vvHeight - 8),
+                background: '#12121f',
+                border: '1px solid rgba(255,255,255,0.1)',
+              }}
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 25 }}
             >
-              <div className="flex items-center justify-between mb-5">
-                <h3 className="text-lg font-bold text-white">Новая привычка</h3>
-                <button onClick={() => setShowAdd(false)} className="p-2 rounded-full bg-white/10">
-                  <X size={16} />
-                </button>
-              </div>
-              <input
-                type="text"
-                value={newName}
-                onChange={e => setNewName(e.target.value)}
-                placeholder="Название привычки..."
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-accent/50 mb-4"
-                autoFocus
-              />
-              <div className="flex gap-2 flex-wrap mb-6">
-                {SPHERES.map(s => (
-                  <button
-                    key={s}
-                    onClick={() => setNewSphere(s)}
-                    className="px-4 py-2 rounded-xl text-sm font-medium transition-all"
-                    style={{
-                      background: newSphere === s ? SPHERE_COLORS[s] + '33' : 'rgba(255,255,255,0.05)',
-                      border: `1px solid ${newSphere === s ? SPHERE_COLORS[s] : 'transparent'}`,
-                      color: newSphere === s ? SPHERE_COLORS[s] : '#9ca3af',
-                    }}
-                  >
-                    {SPHERE_LABELS[s]}
+              <div className="overflow-y-auto flex-1 min-h-0 px-6 pt-6">
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="text-lg font-bold text-white">Новая привычка</h3>
+                  <button onClick={() => setShowAdd(false)} className="p-2 rounded-full bg-white/10">
+                    <X size={16} />
                   </button>
-                ))}
+                </div>
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  placeholder="Название привычки..."
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-accent/50 mb-4"
+                  autoFocus
+                />
+                <div className="flex gap-2 flex-wrap pb-4">
+                  {SPHERES.map(s => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setNewSphere(s)}
+                      className="px-4 py-2 rounded-xl text-sm font-medium transition-all"
+                      style={{
+                        background: newSphere === s ? SPHERE_COLORS[s] + '33' : 'rgba(255,255,255,0.05)',
+                        border: `1px solid ${newSphere === s ? SPHERE_COLORS[s] : 'transparent'}`,
+                        color: newSphere === s ? SPHERE_COLORS[s] : '#9ca3af',
+                      }}
+                    >
+                      {SPHERE_LABELS[s]}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <motion.button
-                onClick={handleAdd}
-                disabled={!newName.trim()}
-                className="w-full py-4 rounded-2xl font-semibold text-white disabled:opacity-40"
-                style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
-                whileTap={{ scale: 0.97 }}
-              >
-                Добавить
-              </motion.button>
+              <div className="flex-shrink-0 px-6 pt-2 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]">
+                <motion.button
+                  type="button"
+                  onClick={handleAdd}
+                  disabled={!newName.trim()}
+                  className="w-full py-4 rounded-2xl font-semibold text-white disabled:opacity-40"
+                  style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
+                  whileTap={{ scale: 0.97 }}
+                >
+                  Добавить
+                </motion.button>
+              </div>
             </motion.div>
           </>
         )}
