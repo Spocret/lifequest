@@ -7,6 +7,9 @@ import type {
   Quest, FeatureKey, PlanStatus, ReferralStats
 } from '@/types'
 
+/** Matches onboarding first quest title (`Onboarding.insertFirstQuest`). */
+const FIRST_JOURNAL_QUEST_TITLE = 'Один честный ответ'
+
 // ─────────────────────────────────────────────────────────────
 // AUTH
 // ─────────────────────────────────────────────────────────────
@@ -109,7 +112,48 @@ export function useCharacter(userId: string | undefined) {
     if (data) setCharacter(data)
   }, [character])
 
-  return { character, loading, error, gainXP, revealCharacter }
+  /** First journal entry: mark onboarding quest complete, +150 XP, avatar revealed. Reads fresh XP from DB. */
+  const completeFirstJournalReveal = useCallback(async () => {
+    if (!character) return
+    const { data: fresh, error: fetchErr } = await supabase
+      .from('characters')
+      .select('*')
+      .eq('id', character.id)
+      .single()
+    if (fetchErr || !fresh) return
+
+    const { data: quest } = await supabase
+      .from('quests')
+      .select('id')
+      .eq('user_id', character.user_id)
+      .eq('status', 'active')
+      .eq('title', FIRST_JOURNAL_QUEST_TITLE)
+      .maybeSingle()
+
+    if (quest) {
+      await supabase.from('quests').update({ status: 'completed' }).eq('id', quest.id)
+    }
+
+    const newXP = fresh.xp + 150
+    const newLevel = calculateLevel(newXP)
+    const updates: Partial<Character> = {
+      avatar_state: 'revealed',
+      xp: newXP,
+      last_active: new Date().toISOString(),
+    }
+    if (newLevel > fresh.level) updates.level = newLevel
+
+    const { data, error } = await supabase
+      .from('characters')
+      .update(updates)
+      .eq('id', character.id)
+      .select()
+      .single()
+
+    if (!error && data) setCharacter(data)
+  }, [character])
+
+  return { character, loading, error, gainXP, revealCharacter, completeFirstJournalReveal }
 }
 
 function calculateLevel(xp: number): number {
@@ -184,12 +228,77 @@ export function useJournal(userId: string | undefined) {
 // HABITS
 // ─────────────────────────────────────────────────────────────
 
+const WEEK_SHORT_RU = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'] as const
+
+/** Local calendar YYYY-MM-DD for Mon–Sun of the week containing `ref`. */
+export function getWeekMonSunDates(ref = new Date()): string[] {
+  const d = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate())
+  const day = d.getDay()
+  const mondayOffset = day === 0 ? -6 : 1 - day
+  d.setDate(d.getDate() + mondayOffset)
+  const out: string[] = []
+  for (let i = 0; i < 7; i++) {
+    const x = new Date(d.getFullYear(), d.getMonth(), d.getDate() + i)
+    const y = x.getFullYear()
+    const m = String(x.getMonth() + 1).padStart(2, '0')
+    const dd = String(x.getDate()).padStart(2, '0')
+    out.push(`${y}-${m}-${dd}`)
+  }
+  return out
+}
+
+export type HabitToggleResult = {
+  completed: boolean
+  habit: Habit | null
+  streakBonus: boolean
+}
+
+export type WeekDayMark = { short: string; date: string; filled: boolean }
+
+function initialWeekMarks(): WeekDayMark[] {
+  const dates = getWeekMonSunDates()
+  return dates.map((date, i) => ({ short: WEEK_SHORT_RU[i], date, filled: false }))
+}
+
 export function useHabits(userId: string | undefined) {
   const [habits, setHabits] = useState<Habit[]>([])
   const [todayLogs, setTodayLogs] = useState<Record<string, boolean>>({})
+  const [weekMarks, setWeekMarks] = useState<WeekDayMark[]>(initialWeekMarks)
   const [loading, setLoading] = useState(true)
 
   const today = new Date().toISOString().split('T')[0]
+
+  const fetchWeekMarks = useCallback(
+    async (habitList: Habit[]) => {
+      const dates = getWeekMonSunDates()
+      if (habitList.length === 0) {
+        setWeekMarks(dates.map((date, i) => ({ short: WEEK_SHORT_RU[i], date, filled: false })))
+        return
+      }
+      const ids = habitList.map(h => h.id)
+      const { data, error } = await supabase
+        .from('habit_logs')
+        .select('date')
+        .in('habit_id', ids)
+        .eq('completed', true)
+        .gte('date', dates[0])
+        .lte('date', dates[6])
+      if (error) {
+        console.error('week marks:', error)
+        setWeekMarks(dates.map((date, i) => ({ short: WEEK_SHORT_RU[i], date, filled: false })))
+        return
+      }
+      const filledDates = new Set((data ?? []).map(r => r.date))
+      setWeekMarks(
+        dates.map((date, i) => ({
+          short: WEEK_SHORT_RU[i],
+          date,
+          filled: filledDates.has(date),
+        })),
+      )
+    },
+    [],
+  )
 
   useEffect(() => {
     if (!userId) return
@@ -197,13 +306,17 @@ export function useHabits(userId: string | undefined) {
       try {
         const [habitsRes, logsRes] = await Promise.all([
           supabase.from('habits').select('*').eq('user_id', userId).order('created_at'),
-          supabase.from('habit_logs').select('habit_id, completed').eq('date', today)
+          supabase.from('habit_logs').select('habit_id, completed').eq('date', today),
         ])
         if (habitsRes.error) throw habitsRes.error
-        setHabits(habitsRes.data ?? [])
+        const list = habitsRes.data ?? []
+        setHabits(list)
         const logs: Record<string, boolean> = {}
-        logsRes.data?.forEach(l => { logs[l.habit_id] = l.completed })
+        logsRes.data?.forEach(l => {
+          logs[l.habit_id] = l.completed
+        })
         setTodayLogs(logs)
+        await fetchWeekMarks(list)
       } catch (e) {
         console.error('Failed to load habits:', e)
       } finally {
@@ -211,41 +324,104 @@ export function useHabits(userId: string | undefined) {
       }
     }
     fetch()
-  }, [userId, today])
+  }, [userId, today, fetchWeekMarks])
 
-  const toggleHabit = useCallback(async (habitId: string): Promise<boolean> => {
-    const isDone = todayLogs[habitId]
-    setTodayLogs(prev => ({ ...prev, [habitId]: !isDone }))
+  const toggleHabit = useCallback(
+    async (habitId: string): Promise<HabitToggleResult> => {
+      const habit = habits.find(h => h.id === habitId) ?? null
+      if (!habit) return { completed: false, habit: null, streakBonus: false }
 
-    if (isDone) {
-      await supabase.from('habit_logs').delete().eq('habit_id', habitId).eq('date', today)
-    } else {
-      await supabase.from('habit_logs').upsert({ habit_id: habitId, date: today, completed: true })
-      const habit = habits.find(h => h.id === habitId)
-      if (habit) {
-        const newStreak = habit.streak + 1
-        await supabase.from('habits').update({ streak: newStreak, last_done: today }).eq('id', habitId)
-        setHabits(prev => prev.map(h => h.id === habitId ? { ...h, streak: newStreak } : h))
+      const isDone = todayLogs[habitId]
+      const prevLogs = { ...todayLogs }
+      const prevHabits = habits.map(h => ({ ...h }))
+
+      setTodayLogs(prev => ({ ...prev, [habitId]: !isDone }))
+
+      try {
+        if (isDone) {
+          await supabase.from('habit_logs').delete().eq('habit_id', habitId).eq('date', today)
+
+          const { data: prevRow } = await supabase
+            .from('habit_logs')
+            .select('date')
+            .eq('habit_id', habitId)
+            .eq('completed', true)
+            .neq('date', today)
+            .order('date', { ascending: false })
+            .limit(1)
+
+          const newLastDone = prevRow?.[0]?.date ?? null
+          const newStreak = Math.max(0, habit.streak - 1)
+
+          await supabase
+            .from('habits')
+            .update({ streak: newStreak, last_done: newLastDone })
+            .eq('id', habitId)
+
+          const updated: Habit = { ...habit, streak: newStreak, last_done: newLastDone }
+          setHabits(prev => prev.map(h => (h.id === habitId ? updated : h)))
+          await fetchWeekMarks(habits.map(h => (h.id === habitId ? updated : h)))
+          return { completed: false, habit: updated, streakBonus: false }
+        }
+
+        await supabase.from('habit_logs').upsert({ habit_id: habitId, date: today, completed: true })
+
+        const y = new Date(today + 'T12:00:00')
+        y.setDate(y.getDate() - 1)
+        const yStr = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, '0')}-${String(y.getDate()).padStart(2, '0')}`
+
+        let newStreak: number
+        if (habit.last_done === null) {
+          newStreak = 1
+        } else if (habit.last_done === yStr) {
+          newStreak = habit.streak + 1
+        } else if (habit.last_done === today) {
+          newStreak = habit.streak
+        } else {
+          newStreak = 1
+        }
+
+        await supabase
+          .from('habits')
+          .update({ streak: newStreak, last_done: today })
+          .eq('id', habitId)
+
+        const updated: Habit = { ...habit, streak: newStreak, last_done: today }
+        setHabits(prev => prev.map(h => (h.id === habitId ? updated : h)))
+
+        const streakBonus = newStreak > 0 && newStreak % 7 === 0
+        await fetchWeekMarks(habits.map(h => (h.id === habitId ? updated : h)))
+        return { completed: true, habit: updated, streakBonus }
+      } catch (e) {
+        console.error(e)
+        setTodayLogs(prevLogs)
+        setHabits(prevHabits)
+        return { completed: false, habit, streakBonus: false }
       }
-    }
-    return !isDone
-  }, [habits, todayLogs, today])
+    },
+    [habits, todayLogs, today, fetchWeekMarks],
+  )
 
-  const addHabit = useCallback(async (name: string, sphere: string, frequency = 'daily') => {
-    if (!userId) return
-    const { data, error } = await supabase
-      .from('habits')
-      .insert({ user_id: userId, name, sphere, frequency })
-      .select()
-      .single()
-    if (error) throw error
-    setHabits(prev => [...prev, data])
-    return data
-  }, [userId])
+  const addHabit = useCallback(
+    async (name: string, sphere: string, frequency: 'daily' | 'weekly' = 'daily') => {
+      if (!userId) return
+      const { data, error } = await supabase
+        .from('habits')
+        .insert({ user_id: userId, name, sphere, frequency })
+        .select()
+        .single()
+      if (error) throw error
+      setHabits(prev => {
+        const next = [...prev, data]
+        void fetchWeekMarks(next)
+        return next
+      })
+      return data
+    },
+    [userId, fetchWeekMarks],
+  )
 
-  const weekProgress = Math.round((Object.values(todayLogs).filter(Boolean).length / Math.max(habits.length, 1)) * 100)
-
-  return { habits, todayLogs, loading, toggleHabit, addHabit, weekProgress }
+  return { habits, todayLogs, weekMarks, loading, toggleHabit, addHabit }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -256,38 +432,79 @@ export function useQuests(userId: string | undefined) {
   const [quests, setQuests] = useState<Quest[]>([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  const fetchQuests = useCallback(async () => {
     if (!userId) return
-    async function fetch() {
-      try {
-        const { data, error } = await supabase
-          .from('quests')
-          .select('*')
-          .eq('user_id', userId)
-          .eq('status', 'active')
-          .order('created_at', { ascending: false })
-        if (error) throw error
-        setQuests(data ?? [])
-      } catch (e) {
-        console.error('Failed to load quests:', e)
-      } finally {
-        setLoading(false)
-      }
+    try {
+      const { data, error } = await supabase
+        .from('quests')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      setQuests(data ?? [])
+    } catch (e) {
+      console.error('Failed to load quests:', e)
+    } finally {
+      setLoading(false)
     }
-    fetch()
   }, [userId])
 
-  const completeQuest = useCallback(async (questId: string): Promise<number> => {
+  useEffect(() => {
+    setLoading(true)
+    void fetchQuests()
+  }, [fetchQuests])
+
+  const completeQuest = useCallback(async (questId: string): Promise<{ xp: number; quest: Quest | null }> => {
     const quest = quests.find(q => q.id === questId)
-    if (!quest) return 0
+    if (!quest) return { xp: 0, quest: null }
     setQuests(prev => prev.filter(q => q.id !== questId))
-    await supabase.from('quests').update({ status: 'completed' }).eq('id', questId)
-    return quest.xp_reward
+    const { error } = await supabase.from('quests').update({ status: 'completed' }).eq('id', questId)
+    if (error) console.error('completeQuest:', error)
+    return { xp: quest.xp_reward, quest }
   }, [quests])
 
   const activeCount = quests.filter(q => q.status === 'active').length
 
-  return { quests, loading, completeQuest, activeCount, hasQuests: quests.length > 0 }
+  return {
+    quests,
+    loading,
+    completeQuest,
+    activeCount,
+    hasQuests: quests.length > 0,
+    refetch: fetchQuests,
+  }
+}
+
+export function useCompletedQuests(userId: string | undefined) {
+  const [quests, setQuests] = useState<Quest[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const fetchQuests = useCallback(async () => {
+    if (!userId) return
+    try {
+      const { data, error } = await supabase
+        .from('quests')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('status', 'completed')
+        .order('created_at', { ascending: false })
+        .limit(100)
+      if (error) throw error
+      setQuests(data ?? [])
+    } catch (e) {
+      console.error('Failed to load completed quests:', e)
+    } finally {
+      setLoading(false)
+    }
+  }, [userId])
+
+  useEffect(() => {
+    setLoading(true)
+    void fetchQuests()
+  }, [fetchQuests])
+
+  return { quests, loading, refetch: fetchQuests }
 }
 
 // ─────────────────────────────────────────────────────────────

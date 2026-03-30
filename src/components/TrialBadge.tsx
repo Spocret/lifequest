@@ -1,34 +1,28 @@
 import { motion } from 'framer-motion'
-import { Clock } from 'lucide-react'
 
 interface TrialBadgeProps {
   daysLeft: number
   onClick?: () => void
 }
 
+/** Dashboard-style: Pro · Nд — amber when 1 day left, purple otherwise */
 export default function TrialBadge({ daysLeft, onClick }: TrialBadgeProps) {
-  const isUrgent = daysLeft <= 1
+  const isUrgent = daysLeft === 1
 
   return (
     <motion.button
+      type="button"
       onClick={onClick}
-      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium"
+      className="shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold tracking-tight"
       style={{
-        background: isUrgent ? '#ef444422' : '#534AB722',
-        border: `1px solid ${isUrgent ? '#ef4444' : '#534AB7'}44`,
-        color: isUrgent ? '#f87171' : '#7F77DD',
+        background: isUrgent ? 'rgba(245, 158, 11, 0.15)' : 'rgba(83, 74, 183, 0.2)',
+        border: `1px solid ${isUrgent ? 'rgba(245, 158, 11, 0.45)' : 'rgba(127, 119, 221, 0.45)'}`,
+        color: isUrgent ? '#fbbf24' : '#a78bfa',
       }}
       animate={isUrgent ? { scale: [1, 1.03, 1] } : {}}
       transition={{ duration: 1.5, repeat: Infinity }}
     >
-      <Clock size={12} />
-      <span>
-        {daysLeft === 0
-          ? 'Пробный период истёк'
-          : daysLeft === 1
-          ? 'Остался 1 день'
-          : `Осталось ${daysLeft} дней`}
-      </span>
+      Pro · {daysLeft}д
     </motion.button>
   )
 }

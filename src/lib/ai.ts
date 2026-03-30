@@ -1,3 +1,6 @@
+import type { Sphere } from '@/types'
+import { SPHERE_LABELS } from '@/types'
+
 const BASE_URL = 'https://openrouter.ai/api/v1'
 const KEY = import.meta.env.VITE_OPENROUTER_KEY as string
 const APP_URL = import.meta.env.VITE_APP_URL as string
@@ -72,6 +75,75 @@ async function streamRequest(model: string, messages: ChatMessage[]): Promise<Re
   if (!res.ok) throw new Error(`AI error: ${res.status}`)
   if (!res.body) throw new Error('No response body')
   return res.body
+}
+
+/** Reads OpenAI-compatible SSE chunks; invokes onDelta for each text delta. Returns full text. */
+export async function consumeOpenRouterStream(
+  stream: ReadableStream<Uint8Array>,
+  onDelta: (chunk: string) => void,
+): Promise<string> {
+  const reader = stream.getReader()
+  const decoder = new TextDecoder()
+  let full = ''
+  let buffer = ''
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed.startsWith('data:')) continue
+        const data = trimmed.slice(5).trim()
+        if (data === '[DONE]') continue
+        try {
+          const json = JSON.parse(data) as {
+            choices?: Array<{ delta?: { content?: string }; message?: { content?: string } }>
+          }
+          const choice = json.choices?.[0]
+          let piece = choice?.delta?.content
+          if (piece === undefined && typeof choice?.message?.content === 'string') {
+            piece = choice.message.content
+          }
+          if (typeof piece === 'string' && piece) {
+            full += piece
+            onDelta(piece)
+          }
+        } catch {
+          // skip malformed lines
+        }
+      }
+    }
+    if (buffer.trim()) {
+      const trimmed = buffer.trim()
+      if (trimmed.startsWith('data:')) {
+        const data = trimmed.slice(5).trim()
+        if (data !== '[DONE]') {
+          try {
+            const json = JSON.parse(data) as {
+              choices?: Array<{ delta?: { content?: string }; message?: { content?: string } }>
+            }
+            const choice = json.choices?.[0]
+            let piece = choice?.delta?.content
+            if (piece === undefined && typeof choice?.message?.content === 'string') {
+              piece = choice.message.content
+            }
+            if (typeof piece === 'string' && piece) {
+              full += piece
+              onDelta(piece)
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  return full
 }
 
 async function jsonRequest(model: string, messages: ChatMessage[], maxTokens = 500): Promise<string> {
@@ -197,26 +269,67 @@ export async function analyzeJournalEntry(entry: string): Promise<string> {
   )
 }
 
-export async function generateQuests(
-  userContext: string,
-): Promise<Array<{ title: string; description: string; sphere: string; difficulty: string }>> {
+export interface GenerateQuestInput {
+  recentEntries: string[]
+  weakestSphere: Sphere
+  weakestStatValue: number
+  characterSummary: string
+}
+
+/** One row from Архитектор JSON (max 3 per response). */
+export interface ArchitectGeneratedQuest {
+  rank: 'F' | 'E' | 'D'
+  title: string
+  description: string
+  sphere: string
+  xp_reward: number
+  deadline_hours: number
+}
+
+/**
+ * Архитектор: last journal entries + weakest stat → up to 3 quests (JSON).
+ */
+export async function generateQuest(input: GenerateQuestInput): Promise<ArchitectGeneratedQuest[]> {
+  const entriesBlock =
+    input.recentEntries.length > 0
+      ? input.recentEntries.map((e, i) => `${i + 1}. ${e}`).join('\n')
+      : '(записей пока нет — опирайся на слабую сферу и контекст героя.)'
+  const weakName = SPHERE_LABELS[input.weakestSphere]
+  const userContent = `Последние записи (до 5):
+${entriesBlock}
+
+Слабейшая сфера: ${weakName} (значение ${input.weakestStatValue}).
+
+Контекст героя: ${input.characterSummary}`
+
+  const system = `Ты Архитектор. Существо вне времени. Наблюдаешь за пользователем LifeQuest.
+Ты составляешь квесты — короткие конкретные действия, которые герой может выполнить. Опирайся на записи и слабую сферу. Язык: русский.
+
+Сгенерируй ровно 3 квеста. Верни ТОЛЬКО JSON-массив без markdown:
+[{"rank":"F"|"E"|"D","title":"...","description":"...","sphere":"mind"|"body"|"spirit"|"resource","xp_reward":число,"deadline_hours":число}]
+rank: F — проще, E — средний, D — сложнее. Описание не более 2 предложений. deadline_hours от 24 до 168. xp_reward согласуй с rank (примерно F 50–80, E 100–180, D 300–450).`
+
   const raw = await jsonRequest(
     MODELS.gemini,
     [
-      {
-        role: 'system',
-        content: `Ты — квест-мастер в RPG-приложении LifeQuest. 
-Сгенерируй 3 персонализированных квеста. Верни JSON-массив: [{title,description,sphere,difficulty}].
-sphere: "mind"|"body"|"spirit"|"resource". difficulty: "easy"|"medium"|"hard"|"epic".
-Описание не более 2 предложений. Только JSON без markdown.`,
-      },
-      { role: 'user', content: userContext },
+      { role: 'system', content: system },
+      { role: 'user', content: userContent },
     ],
-    600,
+    900,
   )
   try {
     const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    return JSON.parse(cleaned)
+    const parsed = JSON.parse(cleaned) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(
+      (x): x is ArchitectGeneratedQuest =>
+        x !== null &&
+        typeof x === 'object' &&
+        'title' in x &&
+        'description' in x &&
+        'sphere' in x &&
+        'rank' in x,
+    ) as ArchitectGeneratedQuest[]
   } catch {
     return []
   }

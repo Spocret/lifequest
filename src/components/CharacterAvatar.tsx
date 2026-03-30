@@ -5,6 +5,8 @@ interface CharacterAvatarProps {
   character: Character
   size?: 'sm' | 'md' | 'lg'
   className?: string
+  /** Pulsing purple aura ring (e.g. dashboard revealed state) */
+  auraPulse?: boolean
 }
 
 const SIZE_MAP = { sm: 48, md: 80, lg: 120 }
@@ -29,12 +31,17 @@ const CLASS_ICONS: Record<Character['class'], string> = {
   entrepreneur: '💼',
 }
 
-export default function CharacterAvatar({ character, size = 'md', className = '' }: CharacterAvatarProps) {
+export default function CharacterAvatar({
+  character,
+  size = 'md',
+  className = '',
+  auraPulse = false,
+}: CharacterAvatarProps) {
   const px = SIZE_MAP[size]
   const isRevealed = character.avatar_state === 'revealed'
   const color = CLASS_COLORS[character.class]
 
-  return (
+  const inner = (
     <motion.div
       className={`relative flex items-center justify-center rounded-full ${className}`}
       style={{ width: px, height: px, background: `${color}22`, border: `2px solid ${color}55` }}
@@ -81,5 +88,31 @@ export default function CharacterAvatar({ character, size = 'md', className = ''
         {character.level}
       </div>
     </motion.div>
+  )
+
+  if (!auraPulse) return inner
+
+  return (
+    <div className="relative flex items-center justify-center">
+      <motion.div
+        className="absolute rounded-full pointer-events-none"
+        style={{
+          width: px + 28,
+          height: px + 28,
+          boxShadow: '0 0 0 2px rgba(127, 119, 221, 0.35)',
+        }}
+        animate={{
+          scale: [1, 1.06, 1],
+          opacity: [0.45, 0.9, 0.45],
+          boxShadow: [
+            '0 0 0 2px rgba(127, 119, 221, 0.25)',
+            '0 0 28px 6px rgba(127, 119, 221, 0.45)',
+            '0 0 0 2px rgba(127, 119, 221, 0.25)',
+          ],
+        }}
+        transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+      />
+      {inner}
+    </div>
   )
 }
