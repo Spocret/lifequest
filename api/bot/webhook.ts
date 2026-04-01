@@ -111,10 +111,6 @@ export default async function handler(req: Request): Promise<Response> {
       await sendTelegramMessage(cbChatId, 'Через сколько напомнить?', {
         parseMode: null,
         buttons: [
-          [
-            { text: '1 час', callback_data: 'remind:1h' },
-            { text: '3 часа', callback_data: 'remind:3h' },
-          ],
           [{ text: 'Завтра 10:00 (МСК)', callback_data: 'remind:tomorrow10' }],
           [{ text: '⬅️ Меню', callback_data: 'menu:root' }],
         ],
@@ -125,13 +121,11 @@ export default async function handler(req: Request): Promise<Response> {
     if (cbData.startsWith('remind:')) {
       const { data: user } = await supabase.from('users').select('id').eq('tg_id', cbChatId).maybeSingle()
       if (user?.id) {
-        let fireAt = new Date(Date.now() + 60 * 60 * 1000)
-        if (cbData === 'remind:3h') fireAt = new Date(Date.now() + 3 * 60 * 60 * 1000)
-        if (cbData === 'remind:tomorrow10') {
-          const now = new Date()
-          const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000)
-          fireAt = new Date(Date.UTC(tomorrow.getUTCFullYear(), tomorrow.getUTCMonth(), tomorrow.getUTCDate(), 7, 0, 0))
-        }
+        // Hobby plan: bot-tick runs daily at ~10:05 MSK (07:05 UTC).
+        // So reminders are aligned to the next day 10:00 MSK.
+        const now = new Date()
+        const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+        const fireAt = new Date(Date.UTC(tomorrow.getUTCFullYear(), tomorrow.getUTCMonth(), tomorrow.getUTCDate(), 7, 0, 0))
         await supabase.from('bot_reminders').insert({
           user_id: user.id,
           tg_id: cbChatId,
