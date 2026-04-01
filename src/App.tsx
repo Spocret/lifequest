@@ -12,6 +12,7 @@ import Quests from './pages/Quests'
 import Chat from './pages/Chat'
 import Referral from './pages/Referral'
 import Upgrade from './pages/Upgrade'
+import Admin from './pages/Admin'
 
 // ── Auth state ─────────────────────────────────────────────────────────────
 type AuthState =
@@ -144,6 +145,7 @@ function AppRoutes() {
         <Route path="/quests" element={protect(<Quests user={user} />)} />
         <Route path="/chat" element={protect(<Chat user={user} />)} />
         <Route path="/referral" element={protect(<Referral user={user} />)} />
+        <Route path="/admin" element={protect(<Admin user={user} />)} />
 
         {/* Upgrade is accessible to all authenticated users */}
         <Route path="/upgrade" element={<Upgrade user={user} />} />

@@ -267,6 +267,7 @@ export function useHabits(userId: string | undefined) {
   const [loading, setLoading] = useState(true)
 
   const today = new Date().toISOString().split('T')[0]
+  const fetchSeq = useRef(0)
 
   const fetchWeekMarks = useCallback(
     async (habitList: Habit[]) => {
@@ -300,31 +301,40 @@ export function useHabits(userId: string | undefined) {
     [],
   )
 
-  useEffect(() => {
+  const fetchHabits = useCallback(async () => {
     if (!userId) return
-    async function fetch() {
-      try {
-        const [habitsRes, logsRes] = await Promise.all([
-          supabase.from('habits').select('*').eq('user_id', userId).order('created_at'),
-          supabase.from('habit_logs').select('habit_id, completed').eq('date', today),
-        ])
-        if (habitsRes.error) throw habitsRes.error
-        const list = habitsRes.data ?? []
-        setHabits(list)
-        const logs: Record<string, boolean> = {}
-        logsRes.data?.forEach(l => {
-          logs[l.habit_id] = l.completed
-        })
-        setTodayLogs(logs)
-        await fetchWeekMarks(list)
-      } catch (e) {
-        console.error('Failed to load habits:', e)
-      } finally {
-        setLoading(false)
-      }
+    const seq = ++fetchSeq.current
+    setLoading(true)
+    try {
+      const [habitsRes, logsRes] = await Promise.all([
+        supabase.from('habits').select('*').eq('user_id', userId).order('created_at'),
+        supabase.from('habit_logs').select('habit_id, completed').eq('date', today),
+      ])
+      if (seq !== fetchSeq.current) return
+      if (habitsRes.error) throw habitsRes.error
+      const list = habitsRes.data ?? []
+      setHabits(list)
+      const logs: Record<string, boolean> = {}
+      logsRes.data?.forEach(l => {
+        logs[l.habit_id] = l.completed
+      })
+      setTodayLogs(logs)
+      await fetchWeekMarks(list)
+    } catch (e) {
+      if (seq !== fetchSeq.current) return
+      console.error('Failed to load habits:', e)
+    } finally {
+      if (seq !== fetchSeq.current) return
+      setLoading(false)
     }
-    fetch()
   }, [userId, today, fetchWeekMarks])
+
+  useEffect(() => {
+    void fetchHabits()
+    return () => {
+      fetchSeq.current++
+    }
+  }, [fetchHabits])
 
   const toggleHabit = useCallback(
     async (habitId: string): Promise<HabitToggleResult> => {
@@ -416,12 +426,13 @@ export function useHabits(userId: string | undefined) {
         void fetchWeekMarks(next)
         return next
       })
+      void fetchHabits()
       return data
     },
-    [userId, fetchWeekMarks],
+    [userId, fetchWeekMarks, fetchHabits],
   )
 
-  return { habits, todayLogs, weekMarks, loading, toggleHabit, addHabit }
+  return { habits, todayLogs, weekMarks, loading, toggleHabit, addHabit, refetch: fetchHabits }
 }
 
 // ─────────────────────────────────────────────────────────────

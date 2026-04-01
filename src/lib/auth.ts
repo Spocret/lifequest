@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { applyReferralCode } from './referral'
+import { getAdminTgId } from './admin'
 import type { User, Character } from '@/types'
 
 const TRIAL_DAYS = 5
@@ -46,6 +47,8 @@ export async function initTelegramAuth(): Promise<AuthResult> {
   }
 
   if (!tgUser) throw new Error('Not in Telegram')
+
+  const adminTgId = getAdminTgId()
 
   // ── Step 2: save referral code to sessionStorage ───────────────
   const freshRef = extractRefCode()
@@ -103,6 +106,17 @@ export async function initTelegramAuth(): Promise<AuthResult> {
 
   const isNewUser = !existing
 
+  // ── Step 3.1: auto-enable Pro for the admin account ────────────
+  if (adminTgId && tgUser.id === adminTgId && user.plan !== 'pro') {
+    const { data: updated } = await supabase
+      .from('users')
+      .update({ plan: 'pro' })
+      .eq('id', user.id)
+      .select()
+      .single()
+    if (updated) user = updated as User
+  }
+
   // ── Step 4: ensure character row exists ────────────────────────
   const { data: existingChar } = await supabase
     .from('characters')
@@ -147,6 +161,19 @@ export async function initTelegramAuth(): Promise<AuthResult> {
   if (isNewUser && refCode && !user.referred_by) {
     await applyReferralCode(user.id, refCode)
     sessionStorage.removeItem(REF_SESSION_KEY)
+  }
+
+  // ── Step 6: notify admin about new user ────────────────────────
+  if (isNewUser && tg.initData) {
+    try {
+      await fetch('/api/bot/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData: tg.initData, event: 'new_user' }),
+      })
+    } catch {
+      // best-effort; ignore
+    }
   }
 
   return { user, character, isNewUser }
