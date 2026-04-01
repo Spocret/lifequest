@@ -74,13 +74,30 @@ function mainMenuButtons(appUrl: string): InlineButton[][] {
 }
 
 async function upsertSession(tgId: number, mode: 'idle' | 'await_broadcast' | 'await_feedback'): Promise<void> {
-  await supabase.from('bot_sessions').upsert({ tg_id: tgId, mode, updated_at: new Date().toISOString() })
+  try {
+    const { error } = await supabase
+      .from('bot_sessions')
+      .upsert({ tg_id: tgId, mode, updated_at: new Date().toISOString() })
+    if (error) console.error('[bot_sessions upsert]', error.message)
+  } catch (e) {
+    console.error('[bot_sessions upsert]', e)
+  }
 }
 
 async function getSessionMode(tgId: number): Promise<'idle' | 'await_broadcast' | 'await_feedback'> {
   const { data } = await supabase.from('bot_sessions').select('mode').eq('tg_id', tgId).maybeSingle()
   const m = String((data as any)?.mode ?? 'idle')
   return m === 'await_broadcast' || m === 'await_feedback' ? (m as any) : 'idle'
+}
+
+/** Never throws — /start must work even if bot_sessions is missing or Supabase is down. */
+async function getSessionModeSafe(tgId: number): Promise<'idle' | 'await_broadcast' | 'await_feedback'> {
+  try {
+    return await getSessionMode(tgId)
+  } catch (e) {
+    console.error('[bot_sessions]', e)
+    return 'idle'
+  }
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -283,7 +300,7 @@ async function handleTelegramUpdate(update: TgUpdate): Promise<Response> {
       await sendTelegramMessage(tgId, 'Отменено.', { parseMode: null })
       return jsonResponse({ ok: true }, { status: 200 })
     }
-    const mode = await getSessionMode(tgId)
+    const mode = await getSessionModeSafe(tgId)
     if (mode === 'await_broadcast' && text && !text.startsWith('/')) {
       await supabase.from('bot_broadcast_jobs').insert({ message_text: text, status: 'pending' })
       await upsertSession(tgId, 'idle')
@@ -292,22 +309,7 @@ async function handleTelegramUpdate(update: TgUpdate): Promise<Response> {
     }
   }
 
-  // Feedback flow
-  const mode = await getSessionMode(tgId)
-  if (mode === 'await_feedback' && text && !text.startsWith('/')) {
-    await upsertSession(tgId, 'idle')
-    if (adminChatId !== null) {
-      const msg = `LifeQuest feedback\nfrom: ${tgId}\n\n${text}`
-      try {
-        await sendTelegramMessage(adminChatId, msg, { parseMode: null })
-      } catch {
-        // best-effort
-      }
-    }
-    await sendTelegramMessage(tgId, 'Спасибо! Передал.', { parseMode: null, buttons: mainMenuButtons(appUrl) })
-    return jsonResponse({ ok: true }, { status: 200 })
-  }
-
+  // Common commands first — no Supabase (fixes 500 if DB tables/env fail).
   if (/^\/menu(?:@\w+)?$/i.test(text)) {
     await sendTelegramMessage(tgId, 'Меню:', { parseMode: null, buttons: mainMenuButtons(appUrl) })
     return jsonResponse({ ok: true }, { status: 200 })
@@ -332,6 +334,22 @@ async function handleTelegramUpdate(update: TgUpdate): Promise<Response> {
     if (!refCode) return jsonResponse({ ok: true }, { status: 200 })
     const cookie = `lq_ref=${encodeURIComponent(refCode)}; Path=/; Max-Age=2592000; SameSite=Lax; Secure`
     return jsonResponse({ ok: true }, { status: 200, headers: { 'Set-Cookie': cookie } })
+  }
+
+  // Feedback flow (needs session row)
+  const mode = await getSessionModeSafe(tgId)
+  if (mode === 'await_feedback' && text && !text.startsWith('/')) {
+    await upsertSession(tgId, 'idle')
+    if (adminChatId !== null) {
+      const msg = `LifeQuest feedback\nfrom: ${tgId}\n\n${text}`
+      try {
+        await sendTelegramMessage(adminChatId, msg, { parseMode: null })
+      } catch {
+        // best-effort
+      }
+    }
+    await sendTelegramMessage(tgId, 'Спасибо! Передал.', { parseMode: null, buttons: mainMenuButtons(appUrl) })
+    return jsonResponse({ ok: true }, { status: 200 })
   }
 
   await sendTelegramMessage(tgId, 'Нажми /menu или /start.', { parseMode: null })
