@@ -27,21 +27,57 @@ export async function sendTelegramMessage(tgId: number, text: string, opts?: Sen
 
   const replyMarkup = rows && rows.length ? { inline_keyboard: rows } : undefined
 
+  const base = {
+    chat_id: tgId,
+    text,
+    ...(opts?.parseMode ? { parse_mode: opts.parseMode } : {}),
+    disable_web_page_preview: opts?.disableWebPagePreview ?? true,
+  }
+
   const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      chat_id: tgId,
-      text,
-      ...(opts?.parseMode ? { parse_mode: opts.parseMode } : {}),
-      disable_web_page_preview: opts?.disableWebPagePreview ?? true,
+      ...base,
       ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
     }),
   })
 
-  if (!res.ok) {
-    const details = await res.text().catch(() => '')
-    throw new Error(`Telegram send failed (${res.status}): ${details}`)
+  if (res.ok) return
+
+  const details = await res.text().catch(() => '')
+  // Retry without keyboard (invalid URL/button often breaks the whole sendMessage).
+  if (replyMarkup) {
+    const res2 = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(base),
+    })
+    if (res2.ok) return
+    const d2 = await res2.text().catch(() => '')
+    throw new Error(`Telegram send failed (${res.status}): ${details}; retry: (${res2.status}): ${d2}`)
+  }
+
+  throw new Error(`Telegram send failed (${res.status}): ${details}`)
+}
+
+/** Plain text only; never throws — use in error paths. */
+export async function sendTelegramPlain(tgId: number, text: string): Promise<boolean> {
+  const token = getBotToken()
+  if (!token) return false
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: tgId,
+        text: text.slice(0, 3500),
+        disable_web_page_preview: true,
+      }),
+    })
+    return res.ok
+  } catch {
+    return false
   }
 }
 

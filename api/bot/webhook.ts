@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { answerCallbackQuery, sendTelegramMessage, type InlineButton } from './send'
+import { answerCallbackQuery, sendTelegramMessage, sendTelegramPlain, type InlineButton } from './send'
 
 type TgUpdate = {
   message?: {
@@ -14,9 +14,18 @@ type TgUpdate = {
 }
 
 function getAppUrl(): string {
-  const url = process.env.APP_URL || process.env.VITE_APP_URL
-  if (!url || url === 'undefined') throw new Error('APP_URL not configured')
-  return url.replace(/\/+$/, '')
+  const raw = (process.env.APP_URL || process.env.VITE_APP_URL || '').trim()
+  if (raw && raw !== 'undefined') {
+    let u = raw.replace(/\/+$/, '')
+    if (!/^https?:\/\//i.test(u)) u = `https://${u.replace(/^\/+/, '')}`
+    return u
+  }
+  const vercel = (process.env.VERCEL_URL || '').trim()
+  if (vercel && vercel !== 'undefined') {
+    const host = vercel.replace(/^https?:\/\//, '').split('/')[0]
+    return `https://${host}`
+  }
+  throw new Error('APP_URL not configured (set APP_URL or rely on VERCEL_URL on Vercel)')
 }
 
 function parseStartRef(text: string): string | null {
@@ -88,7 +97,13 @@ export default async function handler(req: Request): Promise<Response> {
     return await handleTelegramUpdate(update)
   } catch (e) {
     console.error('[webhook]', e)
-    // Telegram retries on non-2xx; acknowledge to stop retry storms while we fix root cause.
+    const chatId = update.message?.chat?.id ?? update.callback_query?.message?.chat?.id
+    if (typeof chatId === 'number') {
+      await sendTelegramPlain(
+        chatId,
+        'Не удалось обработать запрос. Попробуй /start ещё раз. Если так и будет — проверь APP_URL и TG_BOT_TOKEN в Vercel.',
+      )
+    }
     return jsonResponse({ ok: true }, { status: 200 })
   }
 }
