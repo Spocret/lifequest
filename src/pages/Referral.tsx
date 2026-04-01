@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { ArrowLeft, Copy, Users, Gift, Check } from 'lucide-react'
+import { ArrowLeft, Copy, Users, Gift, Check, Share2, Crown } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { useReferral } from '@/hooks/useLifeQuest'
@@ -17,7 +17,12 @@ export default function Referral({ user }: ReferralProps) {
   const [copied, setCopied] = useState(false)
   const showAdmin = isAdminUser(user)
 
-  const link = stats ? buildReferralLink(stats.code) : ''
+  const link = stats?.code ? buildReferralLink(stats.code) : ''
+  const shareText = `Прокачиваю себя как RPG. 7 дней бесплатно → ${link}`
+
+  const nextLabel = stats?.nextMilestone
+    ? `До следующей награды: ${stats.nextMilestone.remaining}`
+    : 'Все награды получены'
 
   function copyLink() {
     if (!link) return
@@ -33,21 +38,30 @@ export default function Referral({ user }: ReferralProps) {
         <button onClick={() => navigate(-1)} className="p-2 rounded-xl bg-white/5">
           <ArrowLeft size={20} />
         </button>
-        <h1 className="text-xl font-bold text-white">Реферальная программа</h1>
+        <h1 className="text-xl font-bold text-white">Союзники</h1>
       </div>
 
-      {/* Hero */}
+      {/* Arch message */}
       <motion.div
-        className="rounded-3xl p-6 mb-4 text-center"
+        className="rounded-3xl p-6 mb-4"
         style={{ background: 'linear-gradient(135deg, #534AB733, #12121f)', border: '1px solid #534AB755' }}
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
       >
-        <div className="text-5xl mb-4">🎁</div>
-        <h2 className="text-lg font-bold text-white mb-2">Приглашай друзей</h2>
-        <p className="text-gray-400 text-sm">
-          За каждого друга ты получаешь <span className="text-accent font-medium">+3 дня Pro</span>
-        </p>
+        <div className="flex items-start gap-3">
+          <div className="text-4xl leading-none">🏛️</div>
+          <div className="flex-1">
+            <h2 className="text-lg font-bold text-white mb-1">Архитектор Гильдии</h2>
+            <p className="text-gray-400 text-sm">
+              Пригласи союзников. Награда активируется, когда они пройдут свой первый квест.
+            </p>
+            {stats && (
+              <div className="mt-3 text-xs text-gray-300">
+                <span className="text-gray-400">{nextLabel}</span>
+              </div>
+            )}
+          </div>
+        </div>
       </motion.div>
 
       {/* Stats */}
@@ -55,13 +69,13 @@ export default function Referral({ user }: ReferralProps) {
         <div className="grid grid-cols-2 gap-3 mb-4">
           <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
             <Users size={20} className="text-accent mb-2" />
-            <div className="text-2xl font-bold text-white">{stats.count}</div>
+            <div className="text-2xl font-bold text-white">{stats.total}</div>
             <div className="text-xs text-gray-400">приглашено</div>
           </div>
           <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
             <Gift size={20} className="text-accent mb-2" />
-            <div className="text-2xl font-bold text-white">{stats.bonusDays}</div>
-            <div className="text-xs text-gray-400">бонусных дней</div>
+            <div className="text-2xl font-bold text-white">{stats.daysEarned}</div>
+            <div className="text-xs text-gray-400">дней получено</div>
           </div>
         </div>
       )}
@@ -69,9 +83,9 @@ export default function Referral({ user }: ReferralProps) {
       {/* Referral code */}
       {stats && (
         <div className="rounded-2xl p-4 mb-4" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-          <p className="text-xs text-gray-400 mb-2">Твой реферальный код</p>
+          <p className="text-xs text-gray-400 mb-2">Твоя ссылка</p>
           <div className="flex items-center justify-between">
-            <span className="text-xl font-bold text-white tracking-widest">{stats.code}</span>
+            <span className="text-sm font-semibold text-white truncate max-w-[55%]">{link}</span>
             <motion.button
               onClick={copyLink}
               className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm"
@@ -82,7 +96,46 @@ export default function Referral({ user }: ReferralProps) {
               {copied ? 'Скопировано' : 'Копировать'}
             </motion.button>
           </div>
-          <p className="text-xs text-gray-600 mt-2 truncate">{link}</p>
+          <p className="text-xs text-gray-500 mt-2">
+            Код: <span className="text-gray-300 font-mono">{stats.code}</span>
+          </p>
+        </div>
+      )}
+
+      {/* Milestones */}
+      {stats && (
+        <div className="rounded-2xl p-4 mb-4" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-semibold text-white">Вехи</div>
+            <div className="text-xs text-gray-400">активировано: {stats.activated}</div>
+          </div>
+          <div className="space-y-2">
+            {stats.milestones.map(m => (
+              <div key={m.n} className="flex items-center justify-between rounded-xl px-3 py-2 bg-black/20 border border-white/5">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-white/5 flex items-center justify-center">
+                    {m.status === 'reached' ? <Check size={16} className="text-green-400" /> : <Crown size={16} className="text-gray-400" />}
+                  </div>
+                  <div>
+                    <div className="text-sm text-white">
+                      {m.n} союзник{m.n === 1 ? '' : m.n < 5 ? 'а' : 'ов'}
+                      <span className="text-gray-400"> · +{m.reward.days}д</span>
+                    </div>
+                    {(m.reward.title || m.reward.artifact) && (
+                      <div className="text-xs text-gray-400">
+                        {m.reward.title ? `Титул: ${m.reward.title}` : null}
+                        {m.reward.title && m.reward.artifact ? ' · ' : null}
+                        {m.reward.artifact ? `Артефакт: ${m.reward.artifact}` : null}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className={`text-xs ${m.status === 'reached' ? 'text-green-400' : 'text-gray-500'}`}>
+                  {m.status === 'reached' ? 'получено' : 'впереди'}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -103,13 +156,15 @@ export default function Referral({ user }: ReferralProps) {
         onClick={() => {
           const tg = window.Telegram?.WebApp
           if (tg) {
-            tg.openTelegramLink?.(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('Присоединяйся к LifeQuest — прокачивай жизнь как RPG!')}`)
+            const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(shareText)}`
+            tg.openTelegramLink?.(shareUrl)
           }
         }}
-        className="w-full py-4 rounded-2xl font-semibold text-white"
+        className="w-full py-4 rounded-2xl font-semibold text-white flex items-center justify-center gap-2"
         style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
         whileTap={{ scale: 0.97 }}
       >
+        <Share2 size={18} />
         Поделиться в Telegram
       </motion.button>
 

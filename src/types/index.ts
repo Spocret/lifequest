@@ -95,8 +95,19 @@ export interface Referral {
 
 export interface ReferralStats {
   code: string
-  count: number
-  bonusDays: number
+  total: number
+  activated: number
+  daysEarned: number
+  nextMilestone: null | {
+    n: number
+    remaining: number
+    reward: { days: number; title?: string; artifact?: string }
+  }
+  milestones: Array<{
+    n: 1 | 3 | 5 | 10 | 25
+    status: 'reached' | 'upcoming'
+    reward: { days: number; title?: string; artifact?: string }
+  }>
 }
 
 export type { FeatureKey, PlanStatus } from '@/lib/access'

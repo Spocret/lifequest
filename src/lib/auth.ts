@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import { applyReferralCode } from './referral'
+import { applyReferral } from './referral'
 import { getAdminTgId, normalizeTgId } from './admin'
 import type { User, Character } from '@/types'
 
@@ -160,7 +160,7 @@ export async function initTelegramAuth(): Promise<AuthResult> {
 
   // ── Step 5: apply referral code for new users ──────────────────
   if (isNewUser && refCode && !user.referred_by) {
-    await applyReferralCode(user.id, refCode)
+    await applyReferral(user.id, refCode)
     sessionStorage.removeItem(REF_SESSION_KEY)
   }
 

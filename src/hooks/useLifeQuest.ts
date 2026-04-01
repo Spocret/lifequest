@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { getPlanStatus, canUse } from '@/lib/access'
-import { getReferralStats } from '@/lib/referral'
+import { getReferralStats, activateReferral } from '@/lib/referral'
 import type {
   User, Character, JournalEntry, Habit,
   Quest, FeatureKey, PlanStatus, ReferralStats
@@ -472,8 +472,12 @@ export function useQuests(userId: string | undefined) {
     setQuests(prev => prev.filter(q => q.id !== questId))
     const { error } = await supabase.from('quests').update({ status: 'completed' }).eq('id', questId)
     if (error) console.error('completeQuest:', error)
+    if (userId) {
+      // Best-effort; the function is idempotent after the first activation.
+      void activateReferral(userId)
+    }
     return { xp: quest.xp_reward, quest }
-  }, [quests])
+  }, [quests, userId])
 
   const activeCount = quests.filter(q => q.status === 'active').length
 
