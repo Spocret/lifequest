@@ -44,7 +44,7 @@ async function sendTg(chatId: number, text: string): Promise<boolean> {
   if (!Number.isFinite(chatId)) return false
 
   const appUrl = getAppUrl()
-  const replyMarkup = { inline_keyboard: [[{ text: 'Открыть приложение', web_app: { url: appUrl } }]] }
+  const replyMarkup = { inline_keyboard: [[{ text: 'Открыть приложение', url: appUrl }]] }
 
   try {
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {

@@ -37,7 +37,7 @@ function jsonResponse(body: unknown, init?: ResponseInit): Response {
 }
 
 const supabase = createClient(
-  process.env.VITE_SUPABASE_URL!,
+  process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
 )
 
@@ -60,7 +60,7 @@ function mainMenuButtons(appUrl: string): InlineButton[][] {
       { text: '📝 Фидбек', callback_data: 'menu:feedback' },
     ],
     [{ text: '❓ Помощь', callback_data: 'menu:help' }],
-    [{ text: 'Открыть приложение', web_app: { url: appUrl } }],
+    [{ text: 'Открыть приложение', url: appUrl }],
   ]
 }
 
@@ -84,6 +84,17 @@ export default async function handler(req: Request): Promise<Response> {
     return jsonResponse({ error: 'Invalid JSON' }, { status: 400 })
   }
 
+  try {
+    return await handleTelegramUpdate(update)
+  } catch (e) {
+    console.error('[webhook]', e)
+    // Telegram retries on non-2xx; acknowledge to stop retry storms while we fix root cause.
+    return jsonResponse({ ok: true }, { status: 200 })
+  }
+}
+
+async function handleTelegramUpdate(update: TgUpdate): Promise<Response> {
+
   // Callback queries (inline buttons)
   const cbId = update.callback_query?.id
   const cbData = update.callback_query?.data ?? ''
@@ -100,7 +111,7 @@ export default async function handler(req: Request): Promise<Response> {
       await sendTelegramMessage(cbChatId, 'Открой приложение, чтобы посмотреть квесты.', {
         parseMode: null,
         buttons: [
-          [{ text: 'Открыть приложение', web_app: { url: appUrl } }],
+          [{ text: 'Открыть приложение', url: appUrl }],
           [{ text: '⬅️ Меню', callback_data: 'menu:root' }],
         ],
       })
@@ -136,7 +147,7 @@ export default async function handler(req: Request): Promise<Response> {
       await sendTelegramMessage(cbChatId, 'Ок, поставил напоминание.', {
         parseMode: null,
         buttons: [
-          [{ text: 'Открыть приложение', web_app: { url: appUrl } }],
+          [{ text: 'Открыть приложение', url: appUrl }],
           [{ text: '⬅️ Меню', callback_data: 'menu:root' }],
         ],
       })
@@ -298,7 +309,7 @@ export default async function handler(req: Request): Promise<Response> {
     await sendTelegramMessage(tgId, welcomeText, {
       parseMode: null,
       buttons: [
-        [{ text: 'Открыть приложение', web_app: { url: webAppUrl } }],
+        [{ text: 'Открыть приложение', url: webAppUrl }],
         [{ text: '📋 Меню', callback_data: 'menu:root' }],
       ],
     })
@@ -311,4 +322,3 @@ export default async function handler(req: Request): Promise<Response> {
   await sendTelegramMessage(tgId, 'Нажми /menu или /start.', { parseMode: null })
   return jsonResponse({ ok: true }, { status: 200 })
 }
-

@@ -26,7 +26,7 @@ async function sendTg(chatId: number, text: string, withAppButton = false): Prom
 
   const appUrl = withAppButton ? getAppUrl() : null
   const replyMarkup = appUrl
-    ? { inline_keyboard: [[{ text: 'Открыть приложение', web_app: { url: appUrl } }]] }
+    ? { inline_keyboard: [[{ text: 'Открыть приложение', url: appUrl }]] }
     : undefined
 
   try {
@@ -143,7 +143,7 @@ async function processBroadcasts(): Promise<{ broadcastJobsDone: number; broadca
     const tgId = Number((u as any).tg_id)
     if (!Number.isFinite(tgId)) continue
 
-    const replyMarkup = { inline_keyboard: [[{ text: 'Открыть приложение', web_app: { url: appUrl } }]] }
+    const replyMarkup = { inline_keyboard: [[{ text: 'Открыть приложение', url: appUrl }]] }
     const token = getBotToken()
     if (!token) break
 
