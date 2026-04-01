@@ -4,6 +4,7 @@ export interface User {
   tg_username: string | null
   plan: 'free' | 'trial' | 'pro'
   trial_end: string | null
+  trial_notified?: boolean | null
   referral_code: string
   referred_by: string | null
   created_at: string
