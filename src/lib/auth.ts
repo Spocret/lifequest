@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import { applyReferralCode } from './referral'
-import { getAdminTgId } from './admin'
+import { getAdminTgId, normalizeTgId } from './admin'
 import type { User, Character } from '@/types'
 
 const TRIAL_DAYS = 5
@@ -107,7 +107,8 @@ export async function initTelegramAuth(): Promise<AuthResult> {
   const isNewUser = !existing
 
   // ── Step 3.1: auto-enable Pro for the admin account ────────────
-  if (adminTgId && tgUser.id === adminTgId && user.plan !== 'pro') {
+  const currentTgId = normalizeTgId(tgUser.id)
+  if (adminTgId !== null && currentTgId !== null && currentTgId === adminTgId && user.plan !== 'pro') {
     const { data: updated } = await supabase
       .from('users')
       .update({ plan: 'pro' })

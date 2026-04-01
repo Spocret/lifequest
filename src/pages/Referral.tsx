@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { useReferral } from '@/hooks/useLifeQuest'
 import { buildReferralLink } from '@/lib/referral'
+import { isAdminUser } from '@/lib/admin'
 import type { User } from '@/types'
 
 interface ReferralProps {
@@ -14,6 +15,7 @@ export default function Referral({ user }: ReferralProps) {
   const navigate = useNavigate()
   const { stats, loading } = useReferral(user.id)
   const [copied, setCopied] = useState(false)
+  const showAdmin = isAdminUser(user)
 
   const link = stats ? buildReferralLink(stats.code) : ''
 
@@ -82,6 +84,18 @@ export default function Referral({ user }: ReferralProps) {
           </div>
           <p className="text-xs text-gray-600 mt-2 truncate">{link}</p>
         </div>
+      )}
+
+      {showAdmin && (
+        <motion.button
+          type="button"
+          onClick={() => navigate('/admin')}
+          className="w-full py-3 rounded-2xl font-medium text-sm mb-3 text-white border border-white/10"
+          style={{ background: 'rgba(83, 74, 183, 0.2)' }}
+          whileTap={{ scale: 0.98 }}
+        >
+          Админка — статистика
+        </motion.button>
       )}
 
       {/* Share button */}
