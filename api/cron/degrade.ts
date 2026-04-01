@@ -67,7 +67,7 @@ export default async function handler(req: Request): Promise<Response> {
 
   const { data: users, error: usersErr } = await supabase
     .from('users')
-    .select('id, tg_id')
+    .select('id, tg_id, tg_notify_degrade')
 
   if (usersErr) {
     return new Response(JSON.stringify({ error: usersErr.message }), { status: 500 })
@@ -128,6 +128,7 @@ export default async function handler(req: Request): Promise<Response> {
       resource: Number(char.resource ?? 1),
     }
 
+    const notify = (u as any).tg_notify_degrade !== false
     const tgId = Number(u.tg_id)
     const stats: StatKey[] = ['mind', 'body', 'spirit', 'resource']
 
@@ -164,7 +165,7 @@ export default async function handler(req: Request): Promise<Response> {
         const k = pickRandom(stats)
         nextStats[k] = clampMin1(nextStats[k] - 3)
 
-        if (Number.isFinite(tgId)) {
+        if (notify && Number.isFinite(tgId)) {
           const ok = await sendTg(tgId, 'Тень заметила твоё молчание.')
           if (ok) tgSent++
         }
@@ -177,7 +178,7 @@ export default async function handler(req: Request): Promise<Response> {
           nextStats[k] = clampMin1(nextStats[k] - 5)
         }
 
-        if (Number.isFinite(tgId)) {
+        if (notify && Number.isFinite(tgId)) {
           const ok = await sendTg(tgId, 'Ты не заходил 4 дня. Что происходит?')
           if (ok) tgSent++
         }
@@ -190,7 +191,7 @@ export default async function handler(req: Request): Promise<Response> {
           nextStats[k] = clampMin1(nextStats[k] - 8)
         }
 
-        if (Number.isFinite(tgId)) {
+        if (notify && Number.isFinite(tgId)) {
           const ok = await sendTg(tgId, 'Тёмная фаза. Пройди ритуал воскрешения.')
           if (ok) tgSent++
         }

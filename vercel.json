@@ -7,6 +7,14 @@
     {
       "path": "/api/cron/trial",
       "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/cron/bot-tick",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/weekly-insight",
+      "schedule": "0 7 * * 0"
     }
   ]
 }
