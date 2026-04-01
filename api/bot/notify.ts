@@ -27,7 +27,12 @@ function parseTelegramUser(initData: string): { id: number; username?: string | 
   try {
     const u = JSON.parse(userJson) as { id?: number; username?: string; first_name?: string; last_name?: string }
     if (typeof u?.id !== 'number') return null
-    return u
+    return {
+      id: u.id,
+      username: u.username ?? null,
+      first_name: u.first_name ?? null,
+      last_name: u.last_name ?? null,
+    }
   } catch {
     return null
   }
