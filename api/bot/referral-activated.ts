@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { sendTelegramMessage } from './send'
+import { sendTelegramMessage } from './send.js'
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL!,

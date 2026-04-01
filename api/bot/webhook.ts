@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { answerCallbackQuery, sendTelegramMessage, sendTelegramPlain, type InlineButton } from './send'
+import { answerCallbackQuery, sendTelegramMessage, sendTelegramPlain, type InlineButton } from './send.js'
 
 type TgUpdate = {
   message?: {
