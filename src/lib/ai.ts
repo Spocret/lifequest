@@ -201,6 +201,22 @@ export async function chatWithMemory(
 ): Promise<ReadableStream<Uint8Array>> {
   const context = entries.slice(-20).join('\n---\n')
   const system = SYSTEM_PROMPT_ARCHITECT.replace('{context}', context)
+
+  // In production, proxy via serverless function so OPENROUTER_API_KEY stays server-only.
+  if (import.meta.env.PROD) {
+    const res = await fetch('/api/chat-memory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages, entries }),
+    })
+    if (!res.ok) {
+      const errText = await res.text()
+      throw new Error(`AI error: ${res.status} ${errText.slice(0, 400)}`)
+    }
+    if (!res.body) throw new Error('No response body')
+    return res.body
+  }
+
   return streamRequest(MODELS.gemini, [
     { role: 'system', content: system },
     ...messages,

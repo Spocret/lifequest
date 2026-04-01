@@ -1,54 +1,105 @@
-import { useState, useRef, useEffect } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useVisualViewportInset } from '@/hooks/useVisualViewportInset'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowLeft, Send, Sparkles } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { chatWithMentor } from '@/lib/ai'
-import { canUse } from '@/lib/access'
+import { chatWithMemory, consumeOpenRouterStream, type Message as AiMessage } from '@/lib/ai'
 import Paywall from '@/components/Paywall'
 import type { User } from '@/types'
+import { supabase } from '@/lib/supabase'
 
 interface ChatProps {
   user: User
 }
 
-interface Message {
-  role: 'user' | 'assistant'
-  content: string
-}
+type Message = AiMessage
 
 export default function Chat({ user }: ChatProps) {
   const navigate = useNavigate()
   const { bottomInset } = useVisualViewportInset()
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: 'assistant',
-      content: 'Приветствую, герой! Я твой ИИ-наставник. Готов помочь тебе на пути саморазвития. О чём ты хочешь поговорить?',
-    },
-  ])
+  const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  const scrollToBottom = useMemo(() => {
+    return () => bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [])
 
-  async function handleSend() {
-    if (!input.trim() || loading) return
-    if (!(await canUse(user.id, 'ai_chat'))) return
+  const suggestedQuestions = useMemo(
+    () => [
+      'Что меня беспокоит последний месяц?',
+      'Почему я срываю привычки?',
+      'Как я себя чувствую по понедельникам?',
+    ],
+    [],
+  )
 
-    const userMsg: Message = { role: 'user', content: input.trim() }
-    setMessages(prev => [...prev, userMsg])
+  async function fetchLast20Entries(): Promise<string[]> {
+    const { data, error } = await supabase
+      .from('journal_entries')
+      .select('content')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: true })
+      .limit(20)
+    if (error) {
+      console.error('last20Entries:', error)
+      return []
+    }
+    return (data ?? []).map(r => r.content)
+  }
+
+  async function saveExchangeToDb(userText: string, assistantText: string) {
+    const { error: chatErr } = await supabase.from('chat_exchanges').insert({
+      user_id: user.id,
+      user_message: userText,
+      assistant_message: assistantText,
+    })
+    if (!chatErr) return
+
+    const { error: fallbackErr } = await supabase.from('journal_entries').insert({
+      user_id: user.id,
+      content: userText,
+      ai_response: assistantText,
+      sphere: 'chat',
+      xp_gained: 0,
+    })
+    if (fallbackErr) {
+      console.error('saveExchangeToDb:', { chatErr, fallbackErr })
+    }
+  }
+
+  async function handleSend(explicitText?: string) {
+    const text = (explicitText ?? input).trim()
+    if (!text || loading) return
+
+    const userMsg: Message = { role: 'user', content: text }
+    setMessages(prev => [...prev, userMsg, { role: 'assistant', content: '' }])
     setInput('')
     setLoading(true)
+    scrollToBottom()
 
     try {
-      const history = messages.slice(-10)
-      const reply = await chatWithMentor(history, userMsg.content)
-      setMessages(prev => [...prev, { role: 'assistant', content: reply }])
+      const last20Entries = await fetchLast20Entries()
+      const history = [...messages, userMsg].slice(-20)
+      const stream = await chatWithMemory(history, last20Entries)
+
+      const fullReply = await consumeOpenRouterStream(stream, delta => {
+        setMessages(prev => {
+          const next = [...prev]
+          const lastIdx = next.length - 1
+          if (lastIdx >= 0 && next[lastIdx]?.role === 'assistant') {
+            next[lastIdx] = { role: 'assistant', content: (next[lastIdx]?.content ?? '') + delta }
+          }
+          return next
+        })
+        scrollToBottom()
+      })
+
+      await saveExchangeToDb(userMsg.content, fullReply.trim())
     } catch (e) {
+      console.error(e)
       setMessages(prev => [...prev, { role: 'assistant', content: 'Произошла ошибка. Попробуй ещё раз.' }])
     } finally {
       setLoading(false)
@@ -74,6 +125,28 @@ export default function Chat({ user }: ChatProps) {
       </div>
 
       <div className="flex-1 overflow-y-auto scrollbar-hide px-4 py-4 space-y-3">
+        {messages.length === 0 && (
+          <div className="pt-10">
+            <p className="text-sm text-gray-400 mb-3">Можно начать с вопроса:</p>
+            <div className="flex flex-col gap-2">
+              {suggestedQuestions.map(q => (
+                <button
+                  key={q}
+                  type="button"
+                  onClick={() => handleSend(q)}
+                  className="text-left rounded-2xl px-4 py-3 text-sm"
+                  style={{
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    color: '#fff',
+                  }}
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <AnimatePresence initial={false}>
           {messages.map((msg, i) => (
             <motion.div
@@ -82,34 +155,43 @@ export default function Chat({ user }: ChatProps) {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
             >
-              <div
-                className="max-w-[80%] rounded-2xl px-4 py-3 text-sm"
-                style={{
-                  background: msg.role === 'user'
-                    ? 'linear-gradient(135deg, #534AB7, #7F77DD)'
-                    : 'rgba(255,255,255,0.06)',
-                  color: '#fff',
-                  borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-                }}
-              >
-                {msg.content}
-              </div>
+              {msg.role === 'assistant' ? (
+                <div className="flex items-end gap-2 max-w-[90%]">
+                  <div className="w-7 h-7 rounded-full bg-accent/20 flex items-center justify-center flex-shrink-0">
+                    <Sparkles size={14} className="text-accent" />
+                  </div>
+                  <div
+                    className="max-w-[80%] rounded-2xl px-4 py-3 text-sm"
+                    style={{
+                      background: 'rgba(255,255,255,0.06)',
+                      color: '#fff',
+                      borderRadius: '18px 18px 18px 4px',
+                    }}
+                  >
+                    {msg.content}
+                    {loading && i === messages.length - 1 && msg.content.length === 0 && (
+                      <motion.span
+                        className="inline-block w-0.5 h-4 ml-0.5 align-middle bg-accent"
+                        animate={{ opacity: [1, 0.3, 1] }}
+                        transition={{ duration: 0.8, repeat: Infinity }}
+                      />
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div
+                  className="max-w-[80%] rounded-2xl px-4 py-3 text-sm"
+                  style={{
+                    background: 'linear-gradient(135deg, #534AB7, #7F77DD)',
+                    color: '#fff',
+                    borderRadius: '18px 18px 4px 18px',
+                  }}
+                >
+                  {msg.content}
+                </div>
+              )}
             </motion.div>
           ))}
-          {loading && (
-            <motion.div className="flex justify-start" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <div className="bg-white/6 rounded-2xl px-4 py-3 flex gap-1">
-                {[0, 1, 2].map(i => (
-                  <motion.div
-                    key={i}
-                    className="w-2 h-2 rounded-full bg-accent"
-                    animate={{ y: [0, -6, 0] }}
-                    transition={{ duration: 0.6, delay: i * 0.15, repeat: Infinity }}
-                  />
-                ))}
-              </div>
-            </motion.div>
-          )}
         </AnimatePresence>
         <div ref={bottomRef} />
       </div>
@@ -130,7 +212,7 @@ export default function Chat({ user }: ChatProps) {
             className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-accent/50 text-sm disabled:opacity-50"
           />
           <motion.button
-            onClick={handleSend}
+            onClick={() => handleSend()}
             disabled={!input.trim() || loading}
             className="p-3 rounded-2xl disabled:opacity-40"
             style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
