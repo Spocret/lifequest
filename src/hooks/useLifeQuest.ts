@@ -276,6 +276,7 @@ function useHabitsInternal(userId: string | undefined) {
   const [completionCounts, setCompletionCounts] = useState<Record<string, number>>({})
   const [weekMarks, setWeekMarks] = useState<WeekDayMark[]>(initialWeekMarks)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const fetchSeq = useRef(0)
 
@@ -311,14 +312,15 @@ function useHabitsInternal(userId: string | undefined) {
     [],
   )
 
-  const loadLogsForDate = useCallback(async (dateStr: string) => {
-    if (!userId) return {}
-    const { data, error } = await supabase
+  const loadLogsForDate = useCallback(async (dateStr: string, habitIds: string[]) => {
+    if (!userId || habitIds.length === 0) return {}
+    const { data, error: qErr } = await supabase
       .from('habit_logs')
       .select('habit_id, completed')
       .eq('date', dateStr)
-    if (error) {
-      console.error('habit_logs:', error)
+      .in('habit_id', habitIds)
+    if (qErr) {
+      console.error('habit_logs:', qErr)
       return {}
     }
     const logs: Record<string, boolean> = {}
@@ -333,22 +335,34 @@ function useHabitsInternal(userId: string | undefined) {
     const seq = ++fetchSeq.current
     const todayStr = localYmd()
     setLoading(true)
+    setError(null)
     try {
-      const [habitsRes, logsRes] = await Promise.all([
-        supabase.from('habits').select('*').eq('user_id', userId).order('created_at'),
-        supabase.from('habit_logs').select('habit_id, completed').eq('date', todayStr),
-      ])
+      const habitsRes = await supabase
+        .from('habits')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at')
       if (seq !== fetchSeq.current) return
       if (habitsRes.error) throw habitsRes.error
       const list = habitsRes.data ?? []
       setHabits(list)
-      const logs: Record<string, boolean> = {}
-      logsRes.data?.forEach(l => {
-        logs[l.habit_id] = l.completed
-      })
-      setTodayLogs(logs)
 
       const ids = list.map(h => h.id)
+      const logs: Record<string, boolean> = {}
+      if (ids.length > 0) {
+        const { data: logRows, error: logsErr } = await supabase
+          .from('habit_logs')
+          .select('habit_id, completed')
+          .eq('date', todayStr)
+          .in('habit_id', ids)
+        if (seq !== fetchSeq.current) return
+        if (logsErr) throw logsErr
+        logRows?.forEach(l => {
+          logs[l.habit_id] = l.completed
+        })
+      }
+      setTodayLogs(logs)
+
       if (ids.length > 0) {
         const { data: countRows, error: countErr } = await supabase
           .from('habit_logs')
@@ -371,6 +385,7 @@ function useHabitsInternal(userId: string | undefined) {
     } catch (e) {
       if (seq !== fetchSeq.current) return
       console.error('Failed to load habits:', e)
+      setError(e instanceof Error ? e.message : 'Не удалось загрузить привычки')
     } finally {
       if (seq !== fetchSeq.current) return
       setLoading(false)
@@ -383,6 +398,23 @@ function useHabitsInternal(userId: string | undefined) {
       fetchSeq.current++
     }
   }, [fetchHabits])
+
+  // Telegram Mini App: first request may fail while WebView wakes up; reload when returning from background.
+  useEffect(() => {
+    let wasHidden = false
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') {
+        wasHidden = true
+        return
+      }
+      if (document.visibilityState === 'visible' && wasHidden && userId) {
+        wasHidden = false
+        void fetchHabits()
+      }
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [userId, fetchHabits])
 
   const toggleHabit = useCallback(
     async (habitId: string): Promise<HabitToggleResult> => {
@@ -501,6 +533,7 @@ function useHabitsInternal(userId: string | undefined) {
     completionCounts,
     weekMarks,
     loading,
+    error,
     toggleHabit,
     addHabit,
     loadLogsForDate,

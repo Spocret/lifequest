@@ -87,7 +87,14 @@ export default function Dashboard({ user }: DashboardProps) {
   const { character, loading: charLoading } = useCharacter(user.id)
   const { isTrialActive, daysLeft } = usePlan(user.id)
   const { quests, loading: questsLoading } = useQuests(user.id)
-  const { habits, todayLogs, toggleHabit, loading: habitsLoading } = useHabits()
+  const {
+    habits,
+    todayLogs,
+    toggleHabit,
+    loading: habitsLoading,
+    error: habitsError,
+    refetch: refetchHabits,
+  } = useHabits()
   const todayYmd = localYmd()
   const habitsToday = habits.filter(h => isHabitScheduledForDate(h, todayYmd))
   const { warning, isDegrading } = useDegradationWarning(character?.last_active)
@@ -330,9 +337,21 @@ export default function Dashboard({ user }: DashboardProps) {
 
           <div>
             <p className="text-sm text-gray-400 mb-2">Привычки</p>
+            {habitsError && (
+              <div className="text-sm text-amber-200/90 mb-2 space-y-1">
+                <p>Не удалось загрузить. {habitsError}</p>
+                <button
+                  type="button"
+                  className="text-accent underline-offset-2 hover:underline"
+                  onClick={() => void refetchHabits()}
+                >
+                  Обновить
+                </button>
+              </div>
+            )}
             {habitsLoading ? (
               <p className="text-gray-600 text-sm">Загрузка…</p>
-            ) : habitsToday.length === 0 ? (
+            ) : habitsError ? null : habitsToday.length === 0 ? (
               <button
                 type="button"
                 onClick={() => navigate('/habits')}

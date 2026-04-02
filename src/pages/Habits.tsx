@@ -71,10 +71,12 @@ export default function Habits({ user }: HabitsProps) {
     todayLogs,
     weekMarks,
     loading,
+    error: habitsLoadError,
     toggleHabit,
     addHabit,
     completionCounts,
     loadLogsForDate,
+    refetch: refetchHabits,
   } = useHabits()
   const todayYmd = localYmd()
   const [viewDate, setViewDate] = useState(() => localYmd())
@@ -98,13 +100,14 @@ export default function Habits({ user }: HabitsProps) {
   useEffect(() => {
     if (viewDate === todayYmd) return
     let cancelled = false
-    void loadLogsForDate(viewDate).then(logs => {
+    const ids = habits.map(h => h.id)
+    void loadLogsForDate(viewDate, ids).then(logs => {
       if (!cancelled) setViewLogs(logs)
     })
     return () => {
       cancelled = true
     }
-  }, [viewDate, todayYmd, loadLogsForDate])
+  }, [viewDate, todayYmd, loadLogsForDate, habits])
 
   const visibleHabits = habits.filter(h => isHabitScheduledForDate(h, viewDate))
   const canToggle = viewDate === todayYmd
@@ -220,6 +223,21 @@ export default function Habits({ user }: HabitsProps) {
 
       {/* Habits list */}
       <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pb-8 space-y-3">
+        {habitsLoadError && (
+          <div
+            className="rounded-xl px-3 py-2 text-sm text-amber-200/95 mb-2"
+            style={{ background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.25)' }}
+          >
+            <p className="mb-2">{habitsLoadError}</p>
+            <button
+              type="button"
+              className="text-violet-300 underline underline-offset-2"
+              onClick={() => void refetchHabits()}
+            >
+              Повторить
+            </button>
+          </div>
+        )}
         {loading ? (
           <div className="flex justify-center py-20">
             <motion.div
