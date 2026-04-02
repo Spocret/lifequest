@@ -16,6 +16,7 @@ import type {
   Quest, FeatureKey, PlanStatus, ReferralStats
 } from '@/types'
 import { localYmd } from '@/lib/date'
+import { supabaseErrorMessage } from '@/lib/supabaseError'
 
 /** Matches onboarding first quest title (`Onboarding.insertFirstQuest`). */
 const FIRST_JOURNAL_QUEST_TITLE = 'Один честный ответ'
@@ -270,6 +271,19 @@ function initialWeekMarks(): WeekDayMark[] {
   return dates.map((date, i) => ({ short: WEEK_SHORT_RU[i], date, filled: false }))
 }
 
+const DEFAULT_WEEKDAYS: number[] = [1, 2, 3, 4, 5, 6, 7]
+
+const HABIT_COLUMNS_LEGACY =
+  'id, user_id, name, sphere, frequency, streak, last_done, created_at'
+
+function normalizeHabitRow(row: Habit): Habit {
+  const w = row.weekdays
+  if (Array.isArray(w) && w.length > 0) {
+    return { ...row, weekdays: w.map(n => Number(n)) }
+  }
+  return { ...row, weekdays: DEFAULT_WEEKDAYS }
+}
+
 function useHabitsInternal(userId: string | undefined) {
   const [habits, setHabits] = useState<Habit[]>([])
   const [todayLogs, setTodayLogs] = useState<Record<string, boolean>>({})
@@ -337,14 +351,26 @@ function useHabitsInternal(userId: string | undefined) {
     setLoading(true)
     setError(null)
     try {
-      const habitsRes = await supabase
+      let habitsRes = await supabase
         .from('habits')
         .select('*')
         .eq('user_id', userId)
         .order('created_at')
       if (seq !== fetchSeq.current) return
+      if (habitsRes.error) {
+        const hint = supabaseErrorMessage(habitsRes.error, '')
+        const looksLikeWeekdays = /weekdays/i.test(hint) || /schema cache/i.test(hint)
+        if (looksLikeWeekdays) {
+          habitsRes = await supabase
+            .from('habits')
+            .select(HABIT_COLUMNS_LEGACY)
+            .eq('user_id', userId)
+            .order('created_at')
+          if (seq !== fetchSeq.current) return
+        }
+      }
       if (habitsRes.error) throw habitsRes.error
-      const list = habitsRes.data ?? []
+      const list = (habitsRes.data ?? []).map(normalizeHabitRow)
       setHabits(list)
 
       const ids = list.map(h => h.id)
@@ -356,10 +382,13 @@ function useHabitsInternal(userId: string | undefined) {
           .eq('date', todayStr)
           .in('habit_id', ids)
         if (seq !== fetchSeq.current) return
-        if (logsErr) throw logsErr
-        logRows?.forEach(l => {
-          logs[l.habit_id] = l.completed
-        })
+        if (logsErr) {
+          console.error('habit_logs (today):', logsErr)
+        } else {
+          logRows?.forEach(l => {
+            logs[l.habit_id] = l.completed
+          })
+        }
       }
       setTodayLogs(logs)
 
@@ -385,7 +414,7 @@ function useHabitsInternal(userId: string | undefined) {
     } catch (e) {
       if (seq !== fetchSeq.current) return
       console.error('Failed to load habits:', e)
-      setError(e instanceof Error ? e.message : 'Не удалось загрузить привычки')
+      setError(supabaseErrorMessage(e, 'Не удалось загрузить привычки'))
     } finally {
       if (seq !== fetchSeq.current) return
       setLoading(false)
