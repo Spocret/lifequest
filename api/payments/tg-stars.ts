@@ -56,12 +56,15 @@ async function extendProForUser(supabase: ReturnType<typeof createClient>, userI
   if (selErr) throw selErr
 
   const now = Date.now()
-  const raw = row?.pro_until as string | null | undefined
+  const raw = (row as { pro_until?: string | null } | null)?.pro_until
   const currentEnd = raw ? new Date(raw).getTime() : null
   const base = currentEnd !== null && currentEnd > now ? currentEnd : now
   const until = new Date(base + MONTH_MS).toISOString()
 
-  const { error: upErr } = await supabase.from('users').update({ plan: 'pro', pro_until: until }).eq('id', userId)
+  const { error: upErr } = await supabase
+    .from('users')
+    .update({ plan: 'pro', pro_until: until } as Record<string, unknown>)
+    .eq('id', userId)
   if (upErr) throw upErr
   return until
 }

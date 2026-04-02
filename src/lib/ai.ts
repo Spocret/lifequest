@@ -150,10 +150,10 @@ async function jsonRequest(model: string, messages: ChatMessage[], maxTokens = 5
   // Production: Vercel server calls OpenRouter (works for RU users; key in OPENROUTER_API_KEY, not in bundle).
   if (import.meta.env.PROD) {
     try {
-      const res = await fetch('/api/openrouter-json', {
+      const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
+        body: JSON.stringify({ mode: 'json', model, messages, max_tokens: maxTokens }),
       })
       if (res.ok) {
         const data = (await res.json()) as { content?: string }
@@ -204,10 +204,10 @@ async function jsonRequestWithModelsFallback(
 
 export async function askQuestion(entry: string, context: string): Promise<ReadableStream<Uint8Array>> {
   if (import.meta.env.PROD) {
-    const res = await fetch('/api/ask-question', {
+    const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ entry, context }),
+      body: JSON.stringify({ mode: 'stream-ask', entry, context }),
     })
     if (!res.ok) {
       const errText = await res.text()
