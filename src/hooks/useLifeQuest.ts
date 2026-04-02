@@ -106,22 +106,32 @@ export function useCharacter(userId: string | undefined) {
   }, [userId])
 
   const gainXP = useCallback(async (amount: number, stat?: keyof Pick<Character, 'mind' | 'body' | 'spirit' | 'resource'>, statAmount = 2) => {
-    if (!character) return
+    let char = character
+    if (!char && userId) {
+      const { data, error } = await supabase
+        .from('characters')
+        .select('*')
+        .eq('user_id', userId)
+        .single()
+      if (error || !data) return
+      char = data
+    }
+    if (!char) return
     const updates: Partial<Character> = {
-      xp: character.xp + amount,
+      xp: char.xp + amount,
       last_active: new Date().toISOString(),
     }
-    if (stat) updates[stat] = (character[stat] as number) + statAmount
+    if (stat) updates[stat] = (char[stat] as number) + statAmount
 
     const newXP = updates.xp as number
-    const currentLevel = character.level
+    const currentLevel = char.level
     const newLevel = calculateLevel(newXP)
     if (newLevel > currentLevel) updates.level = newLevel
 
     const { data, error } = await supabase
       .from('characters')
       .update(updates)
-      .eq('id', character.id)
+      .eq('id', char.id)
       .select()
       .single()
 
@@ -129,7 +139,7 @@ export function useCharacter(userId: string | undefined) {
       setCharacter(data)
       return { levelUp: newLevel > currentLevel, newLevel }
     }
-  }, [character])
+  }, [character, userId])
 
   const revealCharacter = useCallback(async () => {
     if (!character) return

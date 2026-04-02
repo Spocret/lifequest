@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, Send, Sparkles, Lock } from 'lucide-react'
+import { ArrowLeft, Send, Sparkles, Lock, Loader2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useJournal, useCharacter, useFeatureAccess, useFloatingXP } from '@/hooks/useLifeQuest'
 import { useVisualViewportInset } from '@/hooks/useVisualViewportInset'
@@ -24,6 +24,8 @@ export default function Journal({ user }: JournalProps) {
 
   const [text, setText] = useState('')
   const [aiResponse, setAiResponse] = useState<string | null>(null)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [submitBlocked, setSubmitBlocked] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -32,6 +34,7 @@ export default function Journal({ user }: JournalProps) {
     if (!text.trim() || loading) return
     setSubmitBlocked(false)
     setSubmitError(null)
+    setAiError(null)
 
     const allowed = await canUse(user.id, 'journal_entry')
     if (!allowed) {
@@ -50,16 +53,29 @@ export default function Journal({ user }: JournalProps) {
       await gainXP?.(50, 'spirit', 3)
       showXP(50, '+50 XP', 50)
 
-      if (canUseAI) {
-        void (async () => {
-          try {
-            const aiText = await analyzeJournalEntry(trimmed)
-            setAiResponse(aiText)
-            await updateEntryAi(row.id, aiText)
-          } catch (e) {
-            console.error(e)
+      // Не полагаемся на useFeatureAccess (пока null — было false): спрашиваем доступ явно.
+      const allowAi = await canUse(user.id, 'journal_ai')
+      if (allowAi) {
+        setAiLoading(true)
+        try {
+          const aiText = await analyzeJournalEntry(trimmed)
+          const cleaned = aiText.trim()
+          if (cleaned) {
+            setAiResponse(cleaned)
+            await updateEntryAi(row.id, cleaned)
+          } else {
+            setAiError('Наставник не вернул текст. Попробуй отправить ещё раз.')
           }
-        })()
+        } catch (e) {
+          console.error(e)
+          setAiError(
+            e instanceof Error
+              ? e.message
+              : 'Не удалось получить ответ наставника. Проверь сеть или настройки ИИ на сервере.',
+          )
+        } finally {
+          setAiLoading(false)
+        }
       }
     } catch (e) {
       console.error(e)
@@ -125,7 +141,19 @@ export default function Journal({ user }: JournalProps) {
           }}
         >
           <AnimatePresence>
-            {aiResponse && (
+            {aiLoading && (
+              <motion.div
+                className="mb-3 p-4 rounded-2xl flex items-center gap-2"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                <Loader2 size={16} className="text-accent animate-spin shrink-0" />
+                <span className="text-sm text-gray-400">Наставник отвечает…</span>
+              </motion.div>
+            )}
+            {aiResponse && !aiLoading && (
               <motion.div
                 className="mb-3 p-4 rounded-2xl"
                 style={{ background: '#534AB722', border: '1px solid #534AB744' }}
@@ -200,6 +228,9 @@ export default function Journal({ user }: JournalProps) {
           )}
           {submitError && (
             <p className="text-xs text-red-400/90 mb-2 px-1">{submitError}</p>
+          )}
+          {aiError && (
+            <p className="text-xs text-amber-400/90 mb-2 px-1">{aiError}</p>
           )}
         </div>
 
