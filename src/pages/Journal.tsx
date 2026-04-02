@@ -15,7 +15,7 @@ interface JournalProps {
 
 export default function Journal({ user }: JournalProps) {
   const navigate = useNavigate()
-  const { entries, addEntry, monthlyCount } = useJournal(user.id)
+  const { entries, addEntry, updateEntryAi, monthlyCount } = useJournal(user.id)
   const { gainXP } = useCharacter(user.id)
   const canUseAI = useFeatureAccess(user.id, 'journal_ai') === true
   const { items: xpItems, show: showXP } = useFloatingXP()
@@ -25,10 +25,12 @@ export default function Journal({ user }: JournalProps) {
   const [aiResponse, setAiResponse] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [submitBlocked, setSubmitBlocked] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   async function handleSubmit() {
     if (!text.trim() || loading) return
     setSubmitBlocked(false)
+    setSubmitError(null)
 
     const allowed = await canUse(user.id, 'journal_entry')
     if (!allowed) {
@@ -36,24 +38,31 @@ export default function Journal({ user }: JournalProps) {
       return
     }
 
+    const trimmed = text.trim()
     setLoading(true)
     try {
-      let aiText: string | undefined
-      if (canUseAI) {
-        try {
-          aiText = await analyzeJournalEntry(text)
-          setAiResponse(aiText)
-        } catch (e) {
-          console.error(e)
-          // Запись должна сохраниться даже если ИИ недоступен (ключ, сеть, лимиты).
-        }
-      }
-      await addEntry(text, aiText)
+      // Сначала сохраняем в БД — иначе долгий/зависший OpenRouter блокирует отправку (Telegram / РФ / таймауты).
+      const row = await addEntry(trimmed)
+      if (!row) throw new Error('Не удалось сохранить запись')
+
+      setText('')
       await gainXP?.(50, 'spirit', 3)
       showXP(50, '+50 XP', 50)
-      setText('')
+
+      if (canUseAI) {
+        void (async () => {
+          try {
+            const aiText = await analyzeJournalEntry(trimmed)
+            setAiResponse(aiText)
+            await updateEntryAi(row.id, aiText)
+          } catch (e) {
+            console.error(e)
+          }
+        })()
+      }
     } catch (e) {
       console.error(e)
+      setSubmitError(e instanceof Error ? e.message : 'Не удалось сохранить. Проверь сеть и попробуй снова.')
     } finally {
       setLoading(false)
     }
@@ -185,6 +194,9 @@ export default function Journal({ user }: JournalProps) {
             <p className="text-xs text-amber-400/90 mb-2 px-1">
               Запись недоступна по лимиту. Открой Pro в разделе «Профиль».
             </p>
+          )}
+          {submitError && (
+            <p className="text-xs text-red-400/90 mb-2 px-1">{submitError}</p>
           )}
         </div>
 

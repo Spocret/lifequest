@@ -257,13 +257,24 @@ export function useJournal(userId: string | undefined) {
     return data
   }, [userId])
 
+  const updateEntryAi = useCallback(async (id: string, ai_response: string) => {
+    if (!userId) return
+    const { error } = await supabase
+      .from('journal_entries')
+      .update({ ai_response })
+      .eq('id', id)
+      .eq('user_id', userId)
+    if (error) throw error
+    setEntries(prev => prev.map(e => (e.id === id ? { ...e, ai_response } : e)))
+  }, [userId])
+
   const monthlyCount = entries.filter(e => {
     const entryDate = new Date(e.created_at)
     const now = new Date()
     return entryDate.getMonth() === now.getMonth() && entryDate.getFullYear() === now.getFullYear()
   }).length
 
-  return { entries, loading, error, addEntry, monthlyCount, isFirstEntry: entries.length === 0 }
+  return { entries, loading, error, addEntry, updateEntryAi, monthlyCount, isFirstEntry: entries.length === 0 }
 }
 
 // ─────────────────────────────────────────────────────────────

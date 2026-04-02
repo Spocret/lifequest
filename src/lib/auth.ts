@@ -165,18 +165,5 @@ export async function initTelegramAuth(): Promise<AuthResult> {
     sessionStorage.removeItem(REF_SESSION_KEY)
   }
 
-  // ── Step 6: notify admin about new user ────────────────────────
-  if (isNewUser && tg.initData) {
-    try {
-      await fetch('/api/bot/notify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initData: tg.initData, event: 'new_user' }),
-      })
-    } catch {
-      // best-effort; ignore
-    }
-  }
-
   return { user, character, isNewUser }
 }
