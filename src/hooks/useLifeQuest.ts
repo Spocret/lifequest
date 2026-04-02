@@ -562,13 +562,68 @@ function useHabitsInternal(userId: string | undefined) {
         .select()
         .single()
       if (error) throw error
+      const row = normalizeHabitRow(data as Habit)
       setHabits(prev => {
-        const next = [...prev, data]
+        const next = [...prev, row]
         void fetchWeekMarks(next)
         return next
       })
       void fetchHabits()
-      return data
+      return row
+    },
+    [userId, fetchWeekMarks, fetchHabits],
+  )
+
+  const updateHabit = useCallback(
+    async (habitId: string, name: string, sphere: string, weekdays: number[]) => {
+      if (!userId) return
+      const { data, error } = await supabase
+        .from('habits')
+        .update({ name, sphere, frequency: 'daily', weekdays })
+        .eq('id', habitId)
+        .eq('user_id', userId)
+        .select()
+        .single()
+      if (error) throw error
+      const row = normalizeHabitRow(data as Habit)
+      setHabits(prev => {
+        const next = prev.map(h => (h.id === habitId ? row : h))
+        void fetchWeekMarks(next)
+        return next
+      })
+      void fetchHabits()
+      return row
+    },
+    [userId, fetchWeekMarks, fetchHabits],
+  )
+
+  const deleteHabit = useCallback(
+    async (habitId: string) => {
+      if (!userId) return
+      const { error: logErr } = await supabase.from('habit_logs').delete().eq('habit_id', habitId)
+      if (logErr) throw logErr
+      const { error: habErr } = await supabase
+        .from('habits')
+        .delete()
+        .eq('id', habitId)
+        .eq('user_id', userId)
+      if (habErr) throw habErr
+      setHabits(prev => {
+        const next = prev.filter(h => h.id !== habitId)
+        void fetchWeekMarks(next)
+        return next
+      })
+      setTodayLogs(prev => {
+        const n = { ...prev }
+        delete n[habitId]
+        return n
+      })
+      setCompletionCounts(prev => {
+        const n = { ...prev }
+        delete n[habitId]
+        return n
+      })
+      void fetchHabits()
     },
     [userId, fetchWeekMarks, fetchHabits],
   )
@@ -582,6 +637,8 @@ function useHabitsInternal(userId: string | undefined) {
     error,
     toggleHabit,
     addHabit,
+    updateHabit,
+    deleteHabit,
     loadLogsForDate,
     refetch: fetchHabits,
   }

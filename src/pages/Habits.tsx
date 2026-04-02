@@ -11,13 +11,15 @@ import {
   Activity,
   Sparkles,
   Gem,
+  Pencil,
+  Trash2,
 } from 'lucide-react'
 import { useVisualViewportInset } from '@/hooks/useVisualViewportInset'
 import { useHabits, useCharacter, useFloatingXP } from '@/hooks/useLifeQuest'
 import { isHabitScheduledForDate, localYmd } from '@/lib/date'
 import { canUse } from '@/lib/access'
 import { SPHERE_COLORS, SPHERE_LABELS, type Sphere } from '@/types'
-import type { Character } from '@/types'
+import type { Character, Habit } from '@/types'
 import type { User } from '@/types'
 
 interface HabitsProps {
@@ -74,6 +76,8 @@ export default function Habits({ user }: HabitsProps) {
     error: habitsLoadError,
     toggleHabit,
     addHabit,
+    updateHabit,
+    deleteHabit,
     completionCounts,
     loadLogsForDate,
     refetch: refetchHabits,
@@ -85,6 +89,9 @@ export default function Habits({ user }: HabitsProps) {
   const { items: xpItems, show: showXP } = useFloatingXP()
 
   const [showAdd, setShowAdd] = useState(false)
+  const [editingHabit, setEditingHabit] = useState<Habit | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Habit | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   const [showPaywall, setShowPaywall] = useState(false)
   const [newName, setNewName] = useState('')
   const [newSphere, setNewSphere] = useState<Sphere>('mind')
@@ -128,23 +135,42 @@ export default function Habits({ user }: HabitsProps) {
     }
   }
 
-  async function handleAdd() {
+  function openNewHabitSheet() {
+    setEditingHabit(null)
+    setNewName('')
+    setNewSphere('mind')
+    setNewWeekdays([...ALL_WEEKDAYS])
+    setShowAdd(true)
+  }
+
+  function openEditHabit(habit: Habit) {
+    setEditingHabit(habit)
+    setNewName(habit.name)
+    setNewSphere(habit.sphere as Sphere)
+    const w = habit.weekdays
+    setNewWeekdays(Array.isArray(w) && w.length > 0 ? [...w] : [...ALL_WEEKDAYS])
+    setShowAdd(true)
+  }
+
+  async function handleSaveSheet() {
     const trimmed = newName.trim()
     if (!trimmed || saving) return
+    if (newWeekdays.length === 0) return
 
     setSaving(true)
     try {
+      if (editingHabit) {
+        await updateHabit(editingHabit.id, trimmed, newSphere, newWeekdays)
+        closeSheet()
+        return
+      }
       const allowed = await canUse(user.id, 'habit_add')
       if (!allowed) {
         setShowPaywall(true)
         return
       }
-      if (newWeekdays.length === 0) return
       await addHabit(trimmed, newSphere, newWeekdays)
-      setNewName('')
-      setNewSphere('mind')
-      setNewWeekdays([...ALL_WEEKDAYS])
-      setShowAdd(false)
+      closeSheet()
     } catch (e) {
       console.error(e)
     } finally {
@@ -152,8 +178,22 @@ export default function Habits({ user }: HabitsProps) {
     }
   }
 
+  async function confirmDelete() {
+    if (!deleteTarget || deleteBusy) return
+    setDeleteBusy(true)
+    try {
+      await deleteHabit(deleteTarget.id)
+      setDeleteTarget(null)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setDeleteBusy(false)
+    }
+  }
+
   function closeSheet() {
     setShowAdd(false)
+    setEditingHabit(null)
     setNewName('')
     setNewSphere('mind')
     setNewWeekdays([...ALL_WEEKDAYS])
@@ -168,7 +208,7 @@ export default function Habits({ user }: HabitsProps) {
         <h1 className="text-xl font-bold text-white flex-1">Привычки</h1>
         <button
           type="button"
-          onClick={() => setShowAdd(true)}
+          onClick={openNewHabitSheet}
           className="p-2 rounded-xl"
           style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
           aria-label="Добавить привычку"
@@ -291,6 +331,24 @@ export default function Habits({ user }: HabitsProps) {
                     <span className="text-gray-500 truncate">{SPHERE_LABELS[habit.sphere as Sphere]}</span>
                   </div>
                 </div>
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => openEditHabit(habit)}
+                    className="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                    aria-label="Изменить привычку"
+                  >
+                    <Pencil size={18} strokeWidth={2} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteTarget(habit)}
+                    className="p-2 rounded-xl text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                    aria-label="Удалить привычку"
+                  >
+                    <Trash2 size={18} strokeWidth={2} />
+                  </button>
+                </div>
                 <motion.button
                   type="button"
                   role="checkbox"
@@ -327,6 +385,51 @@ export default function Habits({ user }: HabitsProps) {
             +{item.amount} {item.label}
           </motion.div>
         ))}
+      </AnimatePresence>
+
+      {/* Delete confirm */}
+      <AnimatePresence>
+        {deleteTarget && (
+          <motion.div
+            className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/75"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => !deleteBusy && setDeleteTarget(null)}
+          >
+            <motion.div
+              className="w-full max-w-sm rounded-3xl p-6"
+              style={{ background: '#12121f', border: '1px solid rgba(255,255,255,0.1)' }}
+              initial={{ scale: 0.94, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.94, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+            >
+              <h2 className="text-lg font-semibold text-white">Удалить привычку?</h2>
+              <p className="text-sm text-gray-400 mt-2 leading-relaxed">
+                «{deleteTarget.name}» и все отметки выполнения будут удалены без восстановления.
+              </p>
+              <div className="flex gap-3 mt-6">
+                <button
+                  type="button"
+                  className="flex-1 py-3 rounded-2xl font-medium text-gray-300 bg-white/10"
+                  onClick={() => setDeleteTarget(null)}
+                  disabled={deleteBusy}
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  className="flex-1 py-3 rounded-2xl font-semibold text-white bg-red-600/90 hover:bg-red-600 disabled:opacity-50"
+                  onClick={() => void confirmDelete()}
+                  disabled={deleteBusy}
+                >
+                  {deleteBusy ? '…' : 'Удалить'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {/* Paywall modal */}
@@ -398,7 +501,9 @@ export default function Habits({ user }: HabitsProps) {
             >
               <div className="overflow-y-auto flex-1 min-h-0 px-6 pt-6">
                 <div className="flex items-center justify-between mb-5">
-                  <h3 className="text-lg font-bold text-white">Новая привычка</h3>
+                  <h3 className="text-lg font-bold text-white">
+                    {editingHabit ? 'Редактировать привычку' : 'Новая привычка'}
+                  </h3>
                   <button type="button" onClick={closeSheet} className="p-2 rounded-full bg-white/10">
                     <X size={16} />
                   </button>
@@ -488,7 +593,7 @@ export default function Habits({ user }: HabitsProps) {
               <div className="flex-shrink-0 px-6 pt-2 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]">
                 <motion.button
                   type="button"
-                  onClick={handleAdd}
+                  onClick={() => void handleSaveSheet()}
                   disabled={!newName.trim() || saving || newWeekdays.length === 0}
                   className="w-full py-4 rounded-2xl font-semibold text-white disabled:opacity-40"
                   style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
