@@ -13,6 +13,8 @@ interface ImportMetaEnv {
   readonly VITE_TG_PRO_INVOICE_URL?: string
   /** YooKassa (or other) payment page URL */
   readonly VITE_YOOKASSA_PAYMENT_URL?: string
+  /** Личный кабинет / портал подписки (ЮКасса, бот, и т.д.) */
+  readonly VITE_SUBSCRIPTION_MANAGE_URL?: string
 }
 
 interface ImportMeta {

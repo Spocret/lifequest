@@ -767,7 +767,17 @@ export function usePlan(userId: string | undefined) {
   const isPro = plan?.plan === 'pro'
   const isFree = plan?.plan === 'free' || (plan?.plan === 'trial' && plan?.isTrialExpired)
 
-  return { plan, loading, isTrialActive, isPro, isFree, daysLeft: plan?.daysLeft ?? 0 }
+  return {
+    plan,
+    loading,
+    isTrialActive,
+    isPro,
+    isFree,
+    daysLeft: plan?.daysLeft ?? 0,
+    trialEndsAt: plan?.trialEndsAt ?? null,
+    proEndsAt: plan?.proEndsAt ?? null,
+    proDaysLeft: plan?.proDaysLeft ?? null,
+  }
 }
 
 export function useFeatureAccess(userId: string | undefined, feature: FeatureKey) {

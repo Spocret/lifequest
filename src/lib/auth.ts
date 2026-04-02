@@ -109,9 +109,10 @@ export async function initTelegramAuth(): Promise<AuthResult> {
   // ── Step 3.1: auto-enable Pro for the admin account ────────────
   const currentTgId = normalizeTgId(tgUser.id)
   if (adminTgId !== null && currentTgId !== null && currentTgId === adminTgId && user.plan !== 'pro') {
+    const proUntil = new Date(Date.now() + 30 * 86_400_000).toISOString()
     const { data: updated } = await supabase
       .from('users')
-      .update({ plan: 'pro' })
+      .update({ plan: 'pro', pro_until: proUntil })
       .eq('id', user.id)
       .select()
       .single()

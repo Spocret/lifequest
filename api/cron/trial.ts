@@ -29,6 +29,7 @@ async function sendTg(chatId: number, text: string): Promise<boolean> {
 /**
  * Vercel cron: runs daily (10:00 UTC) to manage trial lifecycle.
  * - Expire trials: plan='trial' AND trial_end < now()
+ * - Expire Pro: plan='pro' AND pro_until < now()
  * - Day-4 reminder: trial_end BETWEEN now+24h AND now+48h AND trial_notified=false
  */
 export default async function handler(req: Request): Promise<Response> {
@@ -88,6 +89,52 @@ export default async function handler(req: Request): Promise<Response> {
     }
   }
 
+  // 1b) Expire Pro subscriptions (pro_until passed)
+  const { data: expiredPro, error: expiredProErr } = await supabase
+    .from('users')
+    .select('id, tg_id')
+    .eq('plan', 'pro')
+    .not('pro_until', 'is', null)
+    .lt('pro_until', nowIso)
+
+  let proExpired = 0
+  let proExpiredTgSent = 0
+
+  if (expiredProErr) {
+    return new Response(JSON.stringify({ error: expiredProErr.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  if (expiredPro?.length) {
+    const proIds = expiredPro.map(u => u.id)
+    const { error: proUpErr } = await supabase
+      .from('users')
+      .update({ plan: 'free', pro_until: null })
+      .in('id', proIds)
+
+    if (proUpErr) {
+      return new Response(JSON.stringify({ error: proUpErr.message }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
+    proExpired = proIds.length
+
+    const proText =
+      'Подписка Pro закончилась. Прогресс сохранён.\n' +
+      'Продлить можно в приложении — Профиль → Подписка.'
+
+    for (const u of expiredPro) {
+      const tgId = Number(u.tg_id)
+      if (!Number.isFinite(tgId)) continue
+      const ok = await sendTg(tgId, proText)
+      if (ok) proExpiredTgSent++
+    }
+  }
+
   // 2) Day-4 reminder (1–2 days before trial_end)
   const { data: remindUsers, error: remindErr } = await supabase
     .from('users')
@@ -141,6 +188,8 @@ export default async function handler(req: Request): Promise<Response> {
       ok: true,
       expired,
       expiredTgSent,
+      proExpired,
+      proExpiredTgSent,
       reminded,
       reminderTgSent,
     }),

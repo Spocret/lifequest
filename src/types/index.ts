@@ -3,6 +3,8 @@ export interface User {
   tg_id: number
   tg_username: string | null
   plan: 'free' | 'trial' | 'pro'
+  /** Окончание оплаченной подписки Pro (ISO); null пока не было оплаты с датой */
+  pro_until?: string | null
   trial_end: string | null
   trial_notified?: boolean | null
   referral_code: string

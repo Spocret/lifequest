@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { ArrowLeft } from 'lucide-react'
-import { useTelegramTheme } from '@/hooks/useLifeQuest'
+import { usePlan, useTelegramTheme } from '@/hooks/useLifeQuest'
 import type { User } from '@/types'
 
 interface UpgradeProps {
@@ -27,12 +27,36 @@ function readFromTrial(searchParams: URLSearchParams): boolean {
   return v === '1' || v === 'true' || v === 'yes'
 }
 
+function formatProEnd(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  try {
+    return new Date(iso).toLocaleDateString('ru-RU', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    })
+  } catch {
+    return null
+  }
+}
+
 export default function Upgrade({ user }: UpgradeProps) {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const fromTrial = readFromTrial(searchParams)
-  const isPro = user.plan === 'pro'
+  const { isPro, loading: planLoading, proEndsAt, proDaysLeft } = usePlan(user.id)
   const { haptic } = useTelegramTheme()
+  const manageUrl = (import.meta.env.VITE_SUBSCRIPTION_MANAGE_URL as string | undefined)?.trim()
+
+  const openManageSubscription = useCallback(() => {
+    if (!manageUrl) return
+    const tg = window.Telegram?.WebApp
+    if (manageUrl.includes('t.me/') && tg?.openTelegramLink) {
+      tg.openTelegramLink(manageUrl)
+      return
+    }
+    window.open(manageUrl, '_blank', 'noopener,noreferrer')
+  }, [manageUrl])
 
   const day5OfferText = (import.meta.env.VITE_DAY5_OFFER_TEXT as string | undefined)?.trim() || DEFAULT_DAY5_OFFER
   const starsInvoiceUrl = (import.meta.env.VITE_TG_PRO_INVOICE_URL as string | undefined)?.trim()
@@ -80,6 +104,16 @@ export default function Upgrade({ user }: UpgradeProps) {
       </div>
 
       <div className="flex-1 px-4 flex flex-col gap-5 pb-8">
+        {planLoading ? (
+          <div className="flex flex-1 justify-center items-center py-24">
+            <motion.div
+              className="w-10 h-10 rounded-full border-2 border-violet-500 border-t-transparent"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+            />
+          </div>
+        ) : (
+          <>
         {fromTrial && (
           <motion.div
             className="flex flex-col items-center gap-4"
@@ -163,11 +197,35 @@ export default function Upgrade({ user }: UpgradeProps) {
             <h2 className="text-xl font-bold text-white mb-1">Pro</h2>
             <p className="text-gray-400 text-sm">Всё, что нужно герою на полном пути</p>
             {isPro && (
-              <div
-                className="mt-3 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold"
-                style={{ background: '#534AB733', color: '#a09af5' }}
-              >
-                ✓ Уже активен
+              <div className="mt-3 space-y-1 text-sm">
+                <div
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold"
+                  style={{ background: '#534AB733', color: '#a09af5' }}
+                >
+                  ✓ Подписка активна
+                </div>
+                {proDaysLeft !== null && proEndsAt && (
+                  <>
+                    <p className="text-gray-300">
+                      Осталось: <span className="text-white font-semibold">{proDaysLeft}</span> дн.
+                    </p>
+                    <p className="text-xs text-gray-500">До {formatProEnd(proEndsAt)}</p>
+                  </>
+                )}
+                {proDaysLeft === null && (
+                  <p className="text-xs text-gray-500 max-w-xs mx-auto">
+                    После оплаты здесь будет дата окончания периода.
+                  </p>
+                )}
+                {isPro && manageUrl && (
+                  <button
+                    type="button"
+                    onClick={openManageSubscription}
+                    className="text-xs text-violet-300 underline-offset-2 hover:underline"
+                  >
+                    Управление подпиской
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -186,10 +244,17 @@ export default function Upgrade({ user }: UpgradeProps) {
           <div className="text-center mb-6 pt-2 border-t border-white/10">
             <p className="text-2xl font-bold text-white tracking-tight">490 ₽ / месяц</p>
             <p className="text-gray-500 text-xs mt-1">отмена в любой момент</p>
+            <p className="text-gray-500 text-xs mt-2 max-w-sm mx-auto leading-relaxed">
+              Подписка на 30 дней; при продлении срок добавляется к текущему.
+            </p>
           </div>
 
-          {!isPro && (
-            <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3">
+              {isPro && (
+                <p className="text-center text-sm text-gray-400 mb-1">
+                  {proDaysLeft !== null ? 'Продлить месяц — срок суммируется с активной подпиской.' : 'Оплата месяца — появится дата в профиле.'}
+                </p>
+              )}
               <motion.button
                 type="button"
                 onClick={payWithStars}
@@ -199,7 +264,7 @@ export default function Upgrade({ user }: UpgradeProps) {
               >
                 <span className="flex items-center gap-2">
                   <span aria-hidden>✦</span>
-                  Продолжить путь
+                  {isPro ? 'Продлить через Stars' : 'Продолжить путь'}
                 </span>
                 <span className="text-xs font-normal text-white/75">Telegram Stars — быстро, без юрлица</span>
               </motion.button>
@@ -210,10 +275,10 @@ export default function Upgrade({ user }: UpgradeProps) {
                 className="w-full py-3.5 rounded-2xl font-semibold text-white text-sm border border-white/15 bg-white/[0.06]"
                 whileTap={{ scale: 0.98 }}
               >
-                ЮКасса — оплата картой
+                {isPro ? 'ЮКасса — продлить подписку' : 'ЮКасса — оплата картой'}
               </motion.button>
 
-              {fromTrial && (
+              {fromTrial && !isPro && (
                 <button
                   type="button"
                   onClick={() => navigate('/dashboard')}
@@ -223,8 +288,9 @@ export default function Upgrade({ user }: UpgradeProps) {
                 </button>
               )}
             </div>
-          )}
         </motion.section>
+          </>
+        )}
       </div>
     </div>
   )
