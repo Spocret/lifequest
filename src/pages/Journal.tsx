@@ -6,6 +6,7 @@ import { useJournal, useCharacter, useFeatureAccess, useFloatingXP } from '@/hoo
 import { useVisualViewportInset } from '@/hooks/useVisualViewportInset'
 import { analyzeJournalEntry } from '@/lib/ai'
 import { canUse } from '@/lib/access'
+import { supabaseErrorMessage } from '@/lib/supabaseError'
 import Paywall from '@/components/Paywall'
 import type { User } from '@/types'
 
@@ -62,7 +63,9 @@ export default function Journal({ user }: JournalProps) {
       }
     } catch (e) {
       console.error(e)
-      setSubmitError(e instanceof Error ? e.message : 'Не удалось сохранить. Проверь сеть и попробуй снова.')
+      setSubmitError(
+        supabaseErrorMessage(e, 'Не удалось сохранить. Проверь сеть и попробуй снова.'),
+      )
     } finally {
       setLoading(false)
     }

@@ -252,7 +252,9 @@ export function useJournal(userId: string | undefined) {
       .insert({ user_id: userId, content, ai_response: aiResponse, sphere, xp_gained: 50 })
       .select()
       .single()
-    if (error) throw error
+    if (error) {
+      throw new Error(supabaseErrorMessage(error, 'Ошибка записи в дневник'))
+    }
     setEntries(prev => [data, ...prev])
     return data
   }, [userId])
@@ -264,7 +266,9 @@ export function useJournal(userId: string | undefined) {
       .update({ ai_response })
       .eq('id', id)
       .eq('user_id', userId)
-    if (error) throw error
+    if (error) {
+      throw new Error(supabaseErrorMessage(error, 'Не удалось обновить ответ наставника'))
+    }
     setEntries(prev => prev.map(e => (e.id === id ? { ...e, ai_response } : e)))
   }, [userId])
 
