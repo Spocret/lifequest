@@ -22,62 +22,76 @@ interface DashboardProps {
 
 const SPHERES: Sphere[] = ['mind', 'body', 'spirit', 'resource']
 
+/** Pre-reveal hero placeholder: flat SVG only (no overflow-hidden / CSS blur) so nothing clips. */
 function MysterySilhouette() {
   return (
-    <div className="relative flex flex-col items-center justify-center w-48 h-56 mx-auto">
-      <div
-        className="absolute inset-0 flex items-center justify-center"
-        style={{ filter: 'blur(10px)' }}
+    <div className="relative flex justify-center w-full max-w-[260px] mx-auto px-2">
+      <svg
+        viewBox="0 0 280 300"
+        className="w-full h-auto max-h-[min(52vh,320px)]"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        aria-hidden
       >
-        <svg
-          viewBox="0 0 200 240"
-          className="w-44 h-52 opacity-90"
-          aria-hidden
-        >
-          <defs>
-            <linearGradient id="sil-hid" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#1e1035" />
-              <stop offset="50%" stopColor="#2d1b4e" />
-              <stop offset="100%" stopColor="#0f0a18" />
-            </linearGradient>
-          </defs>
-          <ellipse cx="100" cy="52" rx="38" ry="44" fill="url(#sil-hid)" />
-          <path
-            d="M 100 98 C 52 98 28 128 22 168 L 18 232 L 182 232 L 178 168 C 172 128 148 98 100 98 Z"
-            fill="url(#sil-hid)"
+        <defs>
+          <radialGradient id="ms-ambient" cx="50%" cy="38%" r="68%">
+            <stop offset="0%" stopColor="rgba(127, 119, 221, 0.28)" />
+            <stop offset="55%" stopColor="rgba(83, 74, 183, 0.08)" />
+            <stop offset="100%" stopColor="rgba(12, 12, 22, 0)" />
+          </radialGradient>
+          <linearGradient id="ms-fill" x1="50%" y1="0%" x2="50%" y2="100%">
+            <stop offset="0%" stopColor="#3b2f63" />
+            <stop offset="100%" stopColor="#15101f" />
+          </linearGradient>
+          <linearGradient id="ms-stroke" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#c4b5fd" />
+            <stop offset="100%" stopColor="#6d28d9" />
+          </linearGradient>
+        </defs>
+        <rect width="280" height="300" fill="url(#ms-ambient)" />
+        <circle
+          cx="140"
+          cy="148"
+          r="118"
+          stroke="rgba(127, 119, 221, 0.22)"
+          strokeWidth="1"
+          strokeDasharray="8 14"
+        />
+        <g>
+          <ellipse
+            cx="140"
+            cy="100"
+            rx="40"
+            ry="44"
+            fill="url(#ms-fill)"
+            stroke="url(#ms-stroke)"
+            strokeWidth="1.5"
           />
-        </svg>
-      </div>
-      <div
-        className="relative flex items-center justify-center w-44 h-52 rounded-3xl overflow-hidden"
-        style={{
-          background: 'radial-gradient(ellipse at 50% 35%, rgba(127,119,221,0.35), transparent 62%)',
-        }}
-      >
-        <svg viewBox="0 0 200 240" className="w-40 h-48 opacity-[0.85]" aria-hidden>
-          <defs>
-            <linearGradient id="sil-fg" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor="#4c1d95" />
-              <stop offset="100%" stopColor="#1a0d2e" />
-            </linearGradient>
-          </defs>
-          <ellipse cx="100" cy="52" rx="36" ry="42" fill="url(#sil-fg)" />
           <path
-            d="M 100 96 C 54 96 32 124 28 162 L 24 228 L 176 228 L 172 162 C 168 124 146 96 100 96 Z"
-            fill="url(#sil-fg)"
+            d="M76 246c0-36 28.7-65.2 64-65.2S204 210 204 246v42H76v-42z"
+            fill="url(#ms-fill)"
+            stroke="url(#ms-stroke)"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
           />
-        </svg>
-        <span
-          className="absolute inset-0 flex items-center justify-center text-[5.5rem] font-serif font-light leading-none select-none pointer-events-none"
-          style={{
-            color: '#a78bfa',
-            textShadow: '0 0 40px rgba(127, 119, 221, 0.65)',
-            paddingBottom: '0.15em',
-          }}
+          <path
+            d="M100 144h80"
+            stroke="url(#ms-stroke)"
+            strokeWidth="1.25"
+            strokeLinecap="round"
+            opacity={0.4}
+          />
+        </g>
+        <text
+          x="140"
+          y="212"
+          textAnchor="middle"
+          fill="#a78bfa"
+          style={{ fontSize: '44px', fontFamily: 'ui-sans-serif, system-ui, sans-serif', fontWeight: 200 }}
         >
           ?
-        </span>
-      </div>
+        </text>
+      </svg>
     </div>
   )
 }
