@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { determineClass } from '@/lib/ai'
+import { determineClass, inferClassFromOnboardingAnswer } from '@/lib/ai'
 import { supabase } from '@/lib/supabase'
 import type { Character } from '@/types'
 import { SPHERE_COLORS, SPHERE_LABELS, type Sphere } from '@/types'
@@ -123,9 +123,7 @@ export default function Onboarding({ userId }: OnboardingProps) {
     if (phase !== 'choice' || saving) return
     setSaving(true)
     try {
-      const cls = await determineClass(answer).catch(() =>
-        answer.includes('Себя') ? 'athlete' : 'entrepreneur',
-      )
+      const cls = await determineClass(answer).catch(() => inferClassFromOnboardingAnswer(answer))
       const statBlock = statsForClass(cls)
       setResolvedClass(cls)
       setStats(statBlock)

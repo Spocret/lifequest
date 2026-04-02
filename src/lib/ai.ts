@@ -281,6 +281,46 @@ export async function weeklyInsight(
   }
 }
 
+/** When AI is unavailable or unparsable; matches onboarding preset buttons + safe default. */
+export function inferClassFromOnboardingAnswer(answer: string): 'athlete' | 'scholar' | 'entrepreneur' {
+  if (answer.includes('Себя')) return 'athlete'
+  if (answer.includes('жизнь') || answer.includes('Свою')) return 'entrepreneur'
+  return 'scholar'
+}
+
+function normalizeClassReply(raw: string): string {
+  return raw
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/\*+/g, '')
+    .trim()
+    .toLowerCase()
+}
+
+/** Parse class from model output (EN/RU) or user text; order avoids mislabeling. */
+function parseClassFromText(text: string): 'athlete' | 'scholar' | 'entrepreneur' | null {
+  const w = normalizeClassReply(text)
+  if (!w) return null
+
+  if (/\bathlete\b/.test(w) || w.includes('athlete')) return 'athlete'
+  if (/\bscholar\b/.test(w) || w.includes('scholar')) return 'scholar'
+  if (/\bentrepreneur\b/.test(w) || w.includes('entrepreneur')) return 'entrepreneur'
+
+  if (
+    /атлет|спортсмен|спортивн|физическ|телесн|здоровь|трениров|силов|вынослив/.test(w)
+  )
+    return 'athlete'
+  if (
+    /учёный|ученый|научн|образован|интеллект|разум|знани|учёб|учеб|книг|мысл|академ/.test(w)
+  )
+    return 'scholar'
+  if (
+    /предприниматель|бизнес|стартап|карьер|финанс|инвест|доход|деньг|ресурсн|рынок/.test(w)
+  )
+    return 'entrepreneur'
+
+  return null
+}
+
 export async function determineClass(
   answer: string,
 ): Promise<'athlete' | 'scholar' | 'entrepreneur'> {
@@ -289,16 +329,18 @@ export async function determineClass(
     [
       {
         role: 'system',
-        content: `По ответу пользователя определи его класс. Ответь ОДНИМ словом без кавычек: athlete, scholar или entrepreneur.`,
+        content: `По ответу пользователя определи его класс RPG: Атлет (тело, дисциплина), Учёный (разум, знания), Предприниматель (ресурсы, результат в мире).
+Ответь ровно ОДНИМ словом латиницей, без кавычек и точки: athlete, scholar или entrepreneur.`,
       },
       { role: 'user', content: answer },
     ],
-    10,
+    32,
   )
-  const word = raw.trim().toLowerCase()
-  if (word.includes('athlete')) return 'athlete'
-  if (word.includes('scholar')) return 'scholar'
-  return 'entrepreneur'
+  const fromAi = parseClassFromText(raw)
+  if (fromAi) return fromAi
+  const fromAnswer = parseClassFromText(answer)
+  if (fromAnswer) return fromAnswer
+  return inferClassFromOnboardingAnswer(answer)
 }
 
 // ── Legacy helpers (Journal, Chat, Quests pages) ──────────────────────────
