@@ -12,6 +12,8 @@ interface TelegramWebApp {
   setHeaderColor(color: string): void
   setBackgroundColor(color: string): void
   openTelegramLink?(url: string): void
+  /** Opens a Telegram invoice (Stars, etc.). `url` from Bot API createInvoiceLink. */
+  openInvoice?(url: string, callback?: (status: 'paid' | 'cancelled' | 'failed' | 'pending') => void): void
   onEvent?(eventType: string, eventHandler: () => void): void
   offEvent?(eventType: string, eventHandler: () => void): void
   version: string

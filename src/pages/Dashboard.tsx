@@ -126,7 +126,10 @@ export default function Dashboard({ user }: DashboardProps) {
       <div className="min-h-dvh bg-background flex flex-col relative">
         {showTrialBadge && (
           <div className="absolute top-0 right-4 z-10 pt-safe pr-0 flex justify-end">
-            <TrialBadge daysLeft={daysLeft} onClick={() => navigate('/referral')} />
+            <TrialBadge
+              daysLeft={daysLeft}
+              onClick={() => navigate(daysLeft === 1 ? '/upgrade?fromTrial=1' : '/referral')}
+            />
           </div>
         )}
         <div className="flex-1 overflow-y-auto scrollbar-hide pb-24 px-4 pt-safe flex flex-col">
@@ -249,7 +252,10 @@ export default function Dashboard({ user }: DashboardProps) {
             </div>
           </div>
           {showTrialBadge && (
-            <TrialBadge daysLeft={daysLeft} onClick={() => navigate('/referral')} />
+            <TrialBadge
+              daysLeft={daysLeft}
+              onClick={() => navigate(daysLeft === 1 ? '/upgrade?fromTrial=1' : '/referral')}
+            />
           )}
         </div>
 

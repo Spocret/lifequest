@@ -75,7 +75,7 @@ function AppLayout({ children }: { children: ReactNode }) {
   return (
     <>
       {children}
-      {pathname !== '/onboarding' && <BottomNav />}
+      {pathname !== '/onboarding' && pathname !== '/upgrade' && <BottomNav />}
     </>
   )
 }
