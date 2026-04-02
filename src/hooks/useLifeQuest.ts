@@ -273,15 +273,21 @@ function initialWeekMarks(): WeekDayMark[] {
 
 const DEFAULT_WEEKDAYS: number[] = [1, 2, 3, 4, 5, 6, 7]
 
-const HABIT_COLUMNS_LEGACY =
-  'id, user_id, name, sphere, frequency, streak, last_done, created_at'
+/** Minimal columns for old DBs (no weekdays / cache issues). No created_at — not all projects have it. */
+const HABIT_COLUMNS_MINIMAL =
+  'id, user_id, name, sphere, frequency, streak, last_done'
+
+const HABIT_COLUMNS_LEGACY = `${HABIT_COLUMNS_MINIMAL}, weekdays`
 
 function normalizeHabitRow(row: Habit): Habit {
   const w = row.weekdays
-  if (Array.isArray(w) && w.length > 0) {
-    return { ...row, weekdays: w.map(n => Number(n)) }
+  const weekdays =
+    Array.isArray(w) && w.length > 0 ? w.map(n => Number(n)) : DEFAULT_WEEKDAYS
+  return {
+    ...row,
+    weekdays,
+    created_at: row.created_at ?? '',
   }
-  return { ...row, weekdays: DEFAULT_WEEKDAYS }
 }
 
 function useHabitsInternal(userId: string | undefined) {
@@ -355,7 +361,7 @@ function useHabitsInternal(userId: string | undefined) {
         .from('habits')
         .select('*')
         .eq('user_id', userId)
-        .order('created_at')
+        .order('id')
       if (seq !== fetchSeq.current) return
       if (habitsRes.error) {
         const hint = supabaseErrorMessage(habitsRes.error, '')
@@ -365,8 +371,19 @@ function useHabitsInternal(userId: string | undefined) {
             .from('habits')
             .select(HABIT_COLUMNS_LEGACY)
             .eq('user_id', userId)
-            .order('created_at')
+            .order('id')
           if (seq !== fetchSeq.current) return
+          if (habitsRes.error) {
+            const h2 = supabaseErrorMessage(habitsRes.error, '')
+            if (/weekdays/i.test(h2) || /schema cache/i.test(h2)) {
+              habitsRes = await supabase
+                .from('habits')
+                .select(HABIT_COLUMNS_MINIMAL)
+                .eq('user_id', userId)
+                .order('id')
+              if (seq !== fetchSeq.current) return
+            }
+          }
         }
       }
       if (habitsRes.error) throw habitsRes.error
