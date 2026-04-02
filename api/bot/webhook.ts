@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { handlePaymentsTelegramUpdate } from '../payments/tg-stars.js'
 import { answerCallbackQuery, sendTelegramMessage, sendTelegramPlain, type InlineButton } from './send.js'
 
 type TgUpdate = {
@@ -131,6 +132,8 @@ export default async function handler(req: Request): Promise<Response> {
 }
 
 async function handleTelegramUpdate(update: TgUpdate): Promise<Response> {
+  const paymentRes = await handlePaymentsTelegramUpdate(update)
+  if (paymentRes) return paymentRes
 
   // Callback queries (inline buttons)
   const cbId = update.callback_query?.id

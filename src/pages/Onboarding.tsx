@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { determineClass } from '@/lib/ai'
 import { supabase } from '@/lib/supabase'
@@ -46,6 +47,7 @@ type Phase =
   | 'quest'
 
 export default function Onboarding({ userId }: OnboardingProps) {
+  const navigate = useNavigate()
   const [phase, setPhase] = useState<Phase>('chat')
   const [visibleMessages, setVisibleMessages] = useState<string[]>([])
   const [typing, setTyping] = useState(false)
@@ -142,7 +144,7 @@ export default function Onboarding({ userId }: OnboardingProps) {
   }
 
   function finishToDashboard() {
-    window.location.href = '/dashboard'
+    navigate('/dashboard', { replace: true })
   }
 
   return (

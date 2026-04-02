@@ -1,4 +1,18 @@
 {
+  "rewrites": [
+    {
+      "source": "/api/payments/create-invoice",
+      "destination": "/api/payments/tg-stars?__action=create-invoice"
+    },
+    {
+      "source": "/api/payments/webhook",
+      "destination": "/api/payments/tg-stars?__action=webhook"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ],
   "crons": [
     {
       "path": "/api/cron/degrade",
