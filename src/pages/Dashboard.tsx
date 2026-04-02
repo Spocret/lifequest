@@ -27,70 +27,81 @@ function MysterySilhouette() {
   return (
     <div className="relative flex justify-center w-full max-w-[260px] mx-auto px-2">
       <svg
-        viewBox="0 0 280 300"
-        className="w-full h-auto max-h-[min(52vh,320px)]"
+        viewBox="0 0 280 288"
+        className="w-full h-auto max-h-[min(52vh,300px)]"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
         aria-hidden
       >
         <defs>
-          <radialGradient id="ms-ambient" cx="50%" cy="38%" r="68%">
-            <stop offset="0%" stopColor="rgba(127, 119, 221, 0.28)" />
-            <stop offset="55%" stopColor="rgba(83, 74, 183, 0.08)" />
+          <radialGradient id="ms-ambient" cx="50%" cy="36%" r="70%">
+            <stop offset="0%" stopColor="rgba(127, 119, 221, 0.26)" />
+            <stop offset="55%" stopColor="rgba(83, 74, 183, 0.07)" />
             <stop offset="100%" stopColor="rgba(12, 12, 22, 0)" />
           </radialGradient>
           <linearGradient id="ms-fill" x1="50%" y1="0%" x2="50%" y2="100%">
-            <stop offset="0%" stopColor="#3b2f63" />
-            <stop offset="100%" stopColor="#15101f" />
+            <stop offset="0%" stopColor="#423368" />
+            <stop offset="100%" stopColor="#120c18" />
           </linearGradient>
           <linearGradient id="ms-stroke" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#c4b5fd" />
-            <stop offset="100%" stopColor="#6d28d9" />
+            <stop offset="0%" stopColor="#ddd6fe" />
+            <stop offset="100%" stopColor="#7c3aed" />
           </linearGradient>
         </defs>
-        <rect width="280" height="300" fill="url(#ms-ambient)" />
+        <rect width="280" height="288" fill="url(#ms-ambient)" />
         <circle
           cx="140"
-          cy="148"
-          r="118"
-          stroke="rgba(127, 119, 221, 0.22)"
+          cy="138"
+          r="108"
+          stroke="rgba(127, 119, 221, 0.2)"
           strokeWidth="1"
-          strokeDasharray="8 14"
+          strokeDasharray="6 12"
         />
-        <g>
-          <ellipse
-            cx="140"
-            cy="100"
-            rx="40"
-            ry="44"
-            fill="url(#ms-fill)"
-            stroke="url(#ms-stroke)"
-            strokeWidth="1.5"
-          />
+        {/* Сначала корпус, затем голова поверх — ровный стык без «зазора» */}
+        <path
+          d="M 78 266
+            L 78 178
+            C 78 152 104 142 132 144
+            C 136 143 140 142 140 142
+            C 140 142 144 143 148 144
+            C 176 142 202 152 202 178
+            L 202 266
+            Z"
+          fill="url(#ms-fill)"
+          stroke="url(#ms-stroke)"
+          strokeWidth="1.35"
+          strokeLinejoin="round"
+        />
+        <ellipse
+          cx="140"
+          cy="105"
+          rx="36"
+          ry="39"
+          fill="url(#ms-fill)"
+          stroke="url(#ms-stroke)"
+          strokeWidth="1.35"
+        />
+        {/* Замок вместо «?» — тот же stroke, композиция как в app lock / hidden identity */}
+        <g transform="translate(140 196)">
           <path
-            d="M76 246c0-36 28.7-65.2 64-65.2S204 210 204 246v42H76v-42z"
-            fill="url(#ms-fill)"
+            d="M-11-14v-6a11 11 0 0 1 22 0v6"
             stroke="url(#ms-stroke)"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M100 144h80"
-            stroke="url(#ms-stroke)"
-            strokeWidth="1.25"
+            strokeWidth="1.65"
             strokeLinecap="round"
-            opacity={0.4}
+            opacity={0.9}
           />
+          <rect
+            x="-14"
+            y="-14"
+            width="28"
+            height="20"
+            rx="3.5"
+            stroke="url(#ms-stroke)"
+            strokeWidth="1.65"
+            fill="rgba(127, 119, 221, 0.07)"
+          />
+          <circle r="2" fill="#c4b5fd" opacity={0.7} />
         </g>
-        <text
-          x="140"
-          y="212"
-          textAnchor="middle"
-          fill="#a78bfa"
-          style={{ fontSize: '44px', fontFamily: 'ui-sans-serif, system-ui, sans-serif', fontWeight: 200 }}
-        >
-          ?
-        </text>
       </svg>
     </div>
   )
