@@ -67,7 +67,7 @@ export default async function handler(req: Request): Promise<Response> {
 
   const { data: users, error: usersErr } = await supabase
     .from('users')
-    .select('id, tg_id, tg_notify_degrade')
+    .select('id, tg_id, tg_notify_degrade, plan')
 
   if (usersErr) {
     return new Response(JSON.stringify({ error: usersErr.message }), { status: 500 })
@@ -96,7 +96,9 @@ export default async function handler(req: Request): Promise<Response> {
     const char = charByUser.get(u.id)
     if (!char?.id || !char?.last_active) continue
 
-    const days = Math.floor((Date.now() - new Date(char.last_active).getTime()) / 86400000)
+    const rawDays = Math.floor((Date.now() - new Date(char.last_active).getTime()) / 86400000)
+    const isPro = (u as { plan?: string }).plan === 'pro'
+    const days = Math.max(0, rawDays - (isPro ? 1 : 0))
     const targetStage = computeStage(days)
     const currentStage = Number.isFinite(char.degradation_stage) ? (Number(char.degradation_stage) as number) : 0
 

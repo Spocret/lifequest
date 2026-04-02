@@ -33,6 +33,8 @@ export interface Character {
   spirit: number
   resource: number
   last_active: string
+  /** Стадия деградации (0–4), см. cron degrade */
+  degradation_stage?: number
   created_at: string
 }
 

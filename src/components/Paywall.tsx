@@ -4,6 +4,7 @@ import { canUse, type FeatureKey } from '@/lib/access'
 
 const FEATURE_TITLES: Record<FeatureKey, string> = {
   journal_entry: 'Записи в дневнике',
+  journal_ai: 'ИИ-вопрос после записи',
   habit_add: 'Новые привычки',
   ai_chat: 'ИИ-наставник',
   weekly_insight: 'Еженедельный инсайт',

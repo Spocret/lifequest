@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { useXPProgress } from '@/hooks/useLifeQuest'
+import { levelRankName } from '@/lib/levelRanks'
 
 interface XPBarProps {
   xp: number
@@ -15,7 +16,9 @@ export default function XPBar({ xp, level, showLabels = true, className = '' }: 
     <div className={`w-full ${className}`}>
       {showLabels && (
         <div className="flex justify-between text-xs text-gray-400 mb-1">
-          <span>Уровень {level}</span>
+          <span>
+            {levelRankName(level)} · ур. {level}
+          </span>
           <span>{xpToNext} XP до следующего</span>
         </div>
       )}

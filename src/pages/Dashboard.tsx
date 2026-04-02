@@ -1,6 +1,9 @@
-import { motion } from 'framer-motion'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
-import { ChevronRight, Flame } from 'lucide-react'
+import { ChevronRight, Flame, Sparkles } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
+import { levelRankName } from '@/lib/levelRanks'
 import CharacterAvatar from '@/components/CharacterAvatar'
 import TrialBadge from '@/components/TrialBadge'
 import QuestCard from '@/components/QuestCard'
@@ -21,6 +24,76 @@ interface DashboardProps {
 }
 
 const SPHERES: Sphere[] = ['mind', 'body', 'spirit', 'resource']
+
+function RitualModal({
+  open,
+  step,
+  onStep,
+  onClose,
+  onComplete,
+}: {
+  open: boolean
+  step: number
+  onStep: (n: number) => void
+  onClose: () => void
+  onComplete: () => void
+}) {
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.75)' }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <motion.div
+            initial={{ y: 40, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 20, opacity: 0 }}
+            className="w-full max-w-md rounded-3xl p-6"
+            style={{ background: '#12121f', border: '1px solid rgba(127, 119, 221, 0.3)' }}
+          >
+            <p className="text-xs uppercase tracking-widest text-violet-400 mb-3">Ритуал воскрешения</p>
+            {step === 1 ? (
+              <>
+                <p className="text-white text-sm mb-6 leading-relaxed">
+                  Что для тебя важнее всего вернуть в движение прямо сейчас?
+                </p>
+                <button
+                  type="button"
+                  className="w-full py-3 rounded-2xl font-semibold text-white mb-2"
+                  style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
+                  onClick={() => onStep(2)}
+                >
+                  Далее
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-white text-sm mb-6 leading-relaxed">
+                  Назови одно маленькое действие, которое сделаешь сегодня.
+                </p>
+                <button
+                  type="button"
+                  className="w-full py-3 rounded-2xl font-semibold text-white mb-2"
+                  style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
+                  onClick={() => void onComplete()}
+                >
+                  Завершить ритуал
+                </button>
+              </>
+            )}
+            <button type="button" className="w-full py-2 text-sm text-gray-500" onClick={onClose}>
+              Закрыть
+            </button>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+}
 
 /** Pre-reveal hero placeholder: flat SVG only (no overflow-hidden / CSS blur) so nothing clips. */
 function MysterySilhouette() {
@@ -109,8 +182,8 @@ function MysterySilhouette() {
 
 export default function Dashboard({ user }: DashboardProps) {
   const navigate = useNavigate()
-  const { character, loading: charLoading } = useCharacter(user.id)
-  const { isTrialActive, daysLeft } = usePlan(user.id)
+  const { character, loading: charLoading, refetch: refetchCharacter } = useCharacter(user.id)
+  const { isTrialActive, daysLeft, isPro } = usePlan(user.id)
   const { quests, loading: questsLoading } = useQuests(user.id)
   const {
     habits,
@@ -122,7 +195,46 @@ export default function Dashboard({ user }: DashboardProps) {
   } = useHabits()
   const todayYmd = localYmd()
   const habitsToday = habits.filter(h => isHabitScheduledForDate(h, todayYmd))
-  const { warning, isDegrading } = useDegradationWarning(character?.last_active)
+  const { warning, isDegrading, stage } = useDegradationWarning(character?.last_active, isPro)
+
+  const [showDay5Bar, setShowDay5Bar] = useState(false)
+  const [ritualOpen, setRitualOpen] = useState(false)
+  const [ritualStep, setRitualStep] = useState(1)
+
+  useEffect(() => {
+    if (user.plan !== 'trial' || !isTrialActive || daysLeft !== 1) {
+      setShowDay5Bar(false)
+      return
+    }
+    if (sessionStorage.getItem('lq_day5_offer_seen') === '1') return
+    setShowDay5Bar(true)
+  }, [user.plan, isTrialActive, daysLeft])
+
+  const dismissDay5Bar = useCallback(() => {
+    sessionStorage.setItem('lq_day5_offer_seen', '1')
+    setShowDay5Bar(false)
+  }, [])
+
+  const imbalanceGap = useMemo(() => {
+    if (!character) return null
+    const vals = [character.mind, character.body, character.spirit, character.resource]
+    const gap = Math.max(...vals) - Math.min(...vals)
+    return gap >= 20 ? gap : null
+  }, [character])
+
+  const completeRitual = useCallback(async () => {
+    if (!character) return
+    await supabase
+      .from('characters')
+      .update({
+        degradation_stage: 0,
+        last_active: new Date().toISOString(),
+      })
+      .eq('id', character.id)
+    await refetchCharacter?.()
+    setRitualOpen(false)
+    setRitualStep(1)
+  }, [character, refetchCharacter])
 
   const showTrialBadge = user.plan === 'trial' && isTrialActive && daysLeft > 0
 
@@ -149,6 +261,39 @@ export default function Dashboard({ user }: DashboardProps) {
     const primaryQuest = quests[0]
     return (
       <div className="min-h-dvh bg-background flex flex-col relative">
+        {showDay5Bar && (
+          <div className="px-4 pt-safe pb-2 z-20">
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-2xl p-4 flex flex-col gap-3"
+              style={{
+                background: 'linear-gradient(135deg, rgba(83,74,183,0.35), rgba(12,12,22,0.95))',
+                border: '1px solid rgba(127, 119, 221, 0.45)',
+              }}
+            >
+              <div className="flex items-start gap-2">
+                <Sparkles className="text-accent shrink-0 mt-0.5" size={18} />
+                <p className="text-sm text-gray-100 leading-snug">
+                  Пятый день испытания. Завтра часть пути станет недоступна — реши сейчас.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white"
+                  style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
+                  onClick={() => navigate('/upgrade?fromTrial=1')}
+                >
+                  Продолжить путь
+                </button>
+                <button type="button" className="text-xs text-gray-500 px-2" onClick={dismissDay5Bar}>
+                  Позже
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
         {showTrialBadge && (
           <div className="absolute top-0 right-4 z-10 pt-safe pr-0 flex justify-end">
             <TrialBadge
@@ -182,14 +327,25 @@ export default function Dashboard({ user }: DashboardProps) {
 
           {isDegrading && (
             <motion.div
-              className="rounded-2xl p-4 mb-4 border border-red-500/30 bg-red-500/10"
+              className="rounded-2xl p-4 mb-4 border border-violet-900/50 bg-gradient-to-b from-black/80 to-violet-950/25"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
             >
-              <p className="text-red-400 text-sm flex items-center gap-2">
-                <Flame size={16} />
+              <p className="text-[10px] uppercase tracking-widest text-violet-400/90 mb-2">Тень</p>
+              <p className="text-gray-200 text-sm flex items-start gap-2">
+                <Flame size={16} className="text-violet-400 shrink-0 mt-0.5" />
                 {warning}
               </p>
+              {stage === 4 && (
+                <button
+                  type="button"
+                  className="mt-3 w-full py-2.5 rounded-xl text-sm font-medium text-white border border-violet-500/40"
+                  style={{ background: 'rgba(83, 74, 183, 0.25)' }}
+                  onClick={() => setRitualOpen(true)}
+                >
+                  Ритуал воскрешения
+                </button>
+              )}
             </motion.div>
           )}
 
@@ -231,12 +387,55 @@ export default function Dashboard({ user }: DashboardProps) {
             </motion.button>
           </motion.div>
         </div>
+        <RitualModal
+          open={ritualOpen}
+          step={ritualStep}
+          onStep={setRitualStep}
+          onClose={() => {
+            setRitualOpen(false)
+            setRitualStep(1)
+          }}
+          onComplete={completeRitual}
+        />
       </div>
     )
   }
 
   return (
     <div className="min-h-dvh bg-background flex flex-col">
+      {showDay5Bar && (
+        <div className="px-4 pt-safe pb-2 shrink-0 z-20">
+          <motion.div
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-2xl p-4 flex flex-col gap-3"
+            style={{
+              background: 'linear-gradient(135deg, rgba(83,74,183,0.35), rgba(12,12,22,0.95))',
+              border: '1px solid rgba(127, 119, 221, 0.45)',
+            }}
+          >
+            <div className="flex items-start gap-2">
+              <Sparkles className="text-accent shrink-0 mt-0.5" size={18} />
+              <p className="text-sm text-gray-100 leading-snug">
+                Пятый день испытания. Завтра часть пути станет недоступна — реши сейчас.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white"
+                style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
+                onClick={() => navigate('/upgrade?fromTrial=1')}
+              >
+                Продолжить путь
+              </button>
+              <button type="button" className="text-xs text-gray-500 px-2" onClick={dismissDay5Bar}>
+                Позже
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto scrollbar-hide pb-24 px-4 pt-safe">
         <div className="flex items-start justify-between gap-3 mb-5">
           <div className="flex-1 min-w-0">
@@ -248,7 +447,7 @@ export default function Dashboard({ user }: DashboardProps) {
                   boxShadow: '0 0 20px rgba(127, 119, 221, 0.25)',
                 }}
               >
-                Ур. {character.level}
+                {levelRankName(character.level)} · ур. {character.level}
               </span>
               <span className="text-xs text-gray-500">
                 {character.name || user.tg_username || 'Герой'}
@@ -320,16 +519,40 @@ export default function Dashboard({ user }: DashboardProps) {
           </div>
         </div>
 
-        {isDegrading && (
+        {imbalanceGap !== null && (
           <motion.div
-            className="rounded-2xl p-4 mb-5 border border-red-500/30 bg-red-500/10"
+            className="rounded-2xl p-4 mb-5 border border-amber-500/25 bg-amber-500/5"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
           >
-            <p className="text-red-400 text-sm flex items-center gap-2">
-              <Flame size={16} />
+            <p className="text-[10px] uppercase tracking-widest text-amber-400/90 mb-1">Дисбаланс</p>
+            <p className="text-sm text-amber-100/90">
+              Одна сфера сильно отстаёт (разрыв {imbalanceGap}+). Архитектор будет класть акцент на слабое звено.
+            </p>
+          </motion.div>
+        )}
+
+        {isDegrading && (
+          <motion.div
+            className="rounded-2xl p-4 mb-5 border border-violet-900/50 bg-gradient-to-b from-black/80 to-violet-950/25"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+          >
+            <p className="text-[10px] uppercase tracking-widest text-violet-400/90 mb-2">Тень</p>
+            <p className="text-gray-200 text-sm flex items-start gap-2">
+              <Flame size={16} className="text-violet-400 shrink-0 mt-0.5" />
               {warning}
             </p>
+            {stage === 4 && (
+              <button
+                type="button"
+                className="mt-3 w-full py-2.5 rounded-xl text-sm font-medium text-white border border-violet-500/40"
+                style={{ background: 'rgba(83, 74, 183, 0.25)' }}
+                onClick={() => setRitualOpen(true)}
+              >
+                Ритуал воскрешения
+              </button>
+            )}
           </motion.div>
         )}
 
@@ -431,6 +654,17 @@ export default function Dashboard({ user }: DashboardProps) {
           </div>
         </section>
       </div>
+
+      <RitualModal
+        open={ritualOpen}
+        step={ritualStep}
+        onStep={setRitualStep}
+        onClose={() => {
+          setRitualOpen(false)
+          setRitualStep(1)
+        }}
+        onComplete={completeRitual}
+      />
     </div>
   )
 }

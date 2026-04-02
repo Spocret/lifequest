@@ -10,6 +10,10 @@ function telegramBotUsername(): string {
 }
 const APPLY_REFERRAL_TRIAL_BONUS_DAYS = 2
 
+/** ТЗ: +3 дня Pro за каждого активированного реферала (дополнительно к вехам). */
+export const PER_REFERRAL_DAYS = 3
+
+/** Бонус при достижении ровно N активированных (лор ТЗ). */
 const MILESTONES = [
   { n: 1, reward: { days: 3 } },
   { n: 3, reward: { days: 7, title: 'Глашатай' } },
@@ -27,6 +31,19 @@ function addDays(iso: string | null | undefined, days: number): string {
 export function getMilestoneReward(n: number): MilestoneReward {
   const hit = MILESTONES.find(m => m.n === n)
   return hit ? hit.reward : { days: 0 }
+}
+
+/** Дней за одну активацию: база + веха на этом номере (если есть). */
+export function rewardDaysForActivationNumber(n: number): number {
+  const m = getMilestoneReward(n)
+  return PER_REFERRAL_DAYS + (Number.isFinite(m.days) ? m.days : 0)
+}
+
+/** Суммарно начислено «дней Pro» при `activated` союзниках (для статистики). */
+export function totalReferralDaysEarned(activated: number): number {
+  let sum = 0
+  for (let i = 1; i <= activated; i++) sum += rewardDaysForActivationNumber(i)
+  return sum
 }
 
 export function buildReferralLink(refCode: string): string {
@@ -121,30 +138,37 @@ export async function activateReferral(referredUserId: string): Promise<void> {
     .eq('status', 'activated')
 
   const n = activatedCount ?? 0
-  const reward = getMilestoneReward(n)
-  if (!reward.days) return
+  const totalDays = rewardDaysForActivationNumber(n)
+  if (totalDays <= 0) return
 
   const { data: refUser } = await supabase
     .from('users')
-    .select('plan, trial_end')
+    .select('plan, trial_end, pro_until')
     .eq('id', referral.referrer_id)
     .maybeSingle()
 
-  // Pro is lifetime in current app; extend trial only for free/trial users.
-  if (refUser?.plan !== 'pro') {
-    const nextTrialEnd = addDays(refUser?.trial_end ?? null, reward.days)
-    const nextPlan: 'trial' | undefined = refUser?.plan === 'free' ? 'trial' : undefined
+  const plan = refUser?.plan as 'free' | 'trial' | 'pro' | undefined
 
+  if (plan === 'pro') {
+    const now = Date.now()
+    const raw = refUser?.pro_until as string | null | undefined
+    const cur = raw ? new Date(raw).getTime() : null
+    const baseMs = cur !== null && cur > now ? cur : now
+    const newUntil = new Date(baseMs + totalDays * 86_400_000).toISOString()
+    await supabase.from('users').update({ plan: 'pro', pro_until: newUntil }).eq('id', referral.referrer_id)
+  } else if (plan === 'trial' || plan === 'free') {
+    const nextTrialEnd = addDays(refUser?.trial_end ?? null, totalDays)
+    const nextPlan: 'trial' | undefined = plan === 'free' ? 'trial' : undefined
     await supabase
       .from('users')
       .update({
         trial_end: nextTrialEnd,
-        ...(nextPlan ? { plan: nextPlan } : {}),
+        ...(nextPlan ? { plan: 'trial' } : {}),
       })
       .eq('id', referral.referrer_id)
   }
 
-  await notifyReferrerActivated(referral.referrer_id, reward.days)
+  await notifyReferrerActivated(referral.referrer_id, totalDays)
 }
 
 export async function getReferralStats(userId: string): Promise<ReferralStats> {
@@ -163,7 +187,7 @@ export async function getReferralStats(userId: string): Promise<ReferralStats> {
 
   const activated = activatedCount ?? 0
   const total = totalCount ?? 0
-  const daysEarned = MILESTONES.filter(m => m.n <= activated).reduce((sum, m) => sum + m.reward.days, 0)
+  const daysEarned = totalReferralDaysEarned(activated)
 
   const next = MILESTONES.find(m => m.n > activated) ?? null
   const toNext = next ? next.n - activated : 0

@@ -147,6 +147,26 @@ export async function consumeOpenRouterStream(
 }
 
 async function jsonRequest(model: string, messages: ChatMessage[], maxTokens = 500): Promise<string> {
+  // Production: Vercel server calls OpenRouter (works for RU users; key in OPENROUTER_API_KEY, not in bundle).
+  if (import.meta.env.PROD) {
+    try {
+      const res = await fetch('/api/openrouter-json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
+      })
+      if (res.ok) {
+        const data = (await res.json()) as { content?: string }
+        if (data.content?.trim()) return data.content
+      }
+    } catch {
+      /* fall through */
+    }
+    throw new Error(
+      'ИИ недоступен: задайте OPENROUTER_API_KEY в переменных окружения Vercel (Settings → Environment Variables).',
+    )
+  }
+
   if (!KEY || String(KEY).trim() === '' || KEY === 'undefined') {
     throw new Error('VITE_OPENROUTER_KEY is not set')
   }
@@ -183,6 +203,20 @@ async function jsonRequestWithModelsFallback(
 // ── New streaming functions ────────────────────────────────────────────────
 
 export async function askQuestion(entry: string, context: string): Promise<ReadableStream<Uint8Array>> {
+  if (import.meta.env.PROD) {
+    const res = await fetch('/api/ask-question', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entry, context }),
+    })
+    if (!res.ok) {
+      const errText = await res.text()
+      throw new Error(`AI error: ${res.status} ${errText.slice(0, 400)}`)
+    }
+    if (!res.body) throw new Error('No response body')
+    return res.body
+  }
+
   const system = SYSTEM_PROMPT_ARCHITECT.replace('{context}', context)
   const messages: ChatMessage[] = [
     { role: 'system', content: system },

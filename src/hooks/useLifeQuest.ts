@@ -66,8 +66,24 @@ export function useCharacter(userId: string | undefined) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const refetch = useCallback(async () => {
+    if (!userId) return
+    try {
+      const { data, error } = await supabase
+        .from('characters')
+        .select('*')
+        .eq('user_id', userId)
+        .single()
+      if (error) throw error
+      setCharacter(data)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load character')
+    }
+  }, [userId])
+
   useEffect(() => {
     if (!userId) return
+    let cancelled = false
     async function fetch() {
       try {
         const { data, error } = await supabase
@@ -76,14 +92,17 @@ export function useCharacter(userId: string | undefined) {
           .eq('user_id', userId)
           .single()
         if (error) throw error
-        setCharacter(data)
+        if (!cancelled) setCharacter(data)
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to load character')
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load character')
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     }
-    fetch()
+    void fetch()
+    return () => {
+      cancelled = true
+    }
   }, [userId])
 
   const gainXP = useCallback(async (amount: number, stat?: keyof Pick<Character, 'mind' | 'body' | 'spirit' | 'resource'>, statAmount = 2) => {
@@ -161,10 +180,13 @@ export function useCharacter(userId: string | undefined) {
       .select()
       .single()
 
-    if (!error && data) setCharacter(data)
+    if (!error && data) {
+      setCharacter(data)
+      void activateReferral(character.user_id)
+    }
   }, [character])
 
-  return { character, loading, error, gainXP, revealCharacter, completeFirstJournalReveal }
+  return { character, loading, error, gainXP, revealCharacter, completeFirstJournalReveal, refetch }
 }
 
 function calculateLevel(xp: number): number {
@@ -194,15 +216,24 @@ export function useJournal(userId: string | undefined) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!userId) return
+    if (!userId) {
+      setLoading(false)
+      return
+    }
     async function fetch() {
+      const uid = userId as string
       try {
-        const { data, error } = await supabase
+        const status = await getPlanStatus(uid)
+        let q = supabase
           .from('journal_entries')
           .select('*')
-          .eq('user_id', userId)
+          .eq('user_id', uid)
           .order('created_at', { ascending: false })
-          .limit(50)
+        if (status.plan === 'free') {
+          const since = new Date(Date.now() - 30 * 86_400_000).toISOString()
+          q = q.gte('created_at', since)
+        }
+        const { data, error } = await q.limit(50)
         if (error) throw error
         setEntries(data ?? [])
       } catch (e) {
@@ -811,20 +842,21 @@ export function useReferral(userId: string | undefined) {
 // DEGRADATION TIMER
 // ─────────────────────────────────────────────────────────────
 
-export function useDegradationWarning(lastActive: string | undefined) {
+export function useDegradationWarning(lastActive: string | undefined, proGrace = false) {
   const [daysInactive, setDaysInactive] = useState(0)
   const [stage, setStage] = useState(0)
 
   useEffect(() => {
     if (!lastActive) return
-    const days = Math.floor((Date.now() - new Date(lastActive).getTime()) / 86400000)
+    const raw = Math.floor((Date.now() - new Date(lastActive).getTime()) / 86400000)
+    const days = Math.max(0, raw - (proGrace ? 1 : 0))
     setDaysInactive(days)
     if (days >= 7) setStage(4)
     else if (days >= 4) setStage(3)
     else if (days >= 2) setStage(2)
     else if (days >= 1) setStage(1)
     else setStage(0)
-  }, [lastActive])
+  }, [lastActive, proGrace])
 
   const messages: Record<number, string> = {
     0: '',

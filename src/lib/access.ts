@@ -2,6 +2,8 @@ import { supabase } from './supabase'
 
 export type FeatureKey =
   | 'journal_entry'
+  /** ИИ-вопрос после записи (есть у Free по ТЗ); не путать с полноценным чатом. */
+  | 'journal_ai'
   | 'habit_add'
   | 'ai_chat'
   | 'weekly_insight'
@@ -135,6 +137,8 @@ export async function canUse(userId: string, feature: FeatureKey): Promise<boole
   }
 
   switch (feature) {
+    case 'journal_ai':
+      return true
     case 'journal_entry':
       return (await countJournalEntriesThisMonth(userId)) < 10
     case 'habit_add':

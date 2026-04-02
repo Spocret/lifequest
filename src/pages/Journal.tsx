@@ -17,7 +17,7 @@ export default function Journal({ user }: JournalProps) {
   const navigate = useNavigate()
   const { entries, addEntry, monthlyCount } = useJournal(user.id)
   const { gainXP } = useCharacter(user.id)
-  const canUseAI = useFeatureAccess(user.id, 'ai_chat') === true
+  const canUseAI = useFeatureAccess(user.id, 'journal_ai') === true
   const { items: xpItems, show: showXP } = useFloatingXP()
   const { bottomInset } = useVisualViewportInset()
 
@@ -40,11 +40,16 @@ export default function Journal({ user }: JournalProps) {
     try {
       let aiText: string | undefined
       if (canUseAI) {
-        aiText = await analyzeJournalEntry(text)
-        setAiResponse(aiText)
+        try {
+          aiText = await analyzeJournalEntry(text)
+          setAiResponse(aiText)
+        } catch (e) {
+          console.error(e)
+          // Запись должна сохраниться даже если ИИ недоступен (ключ, сеть, лимиты).
+        }
       }
       await addEntry(text, aiText)
-      await gainXP?.(50, 'mind')
+      await gainXP?.(50, 'spirit', 3)
       showXP(50, '+50 XP', 50)
       setText('')
     } catch (e) {

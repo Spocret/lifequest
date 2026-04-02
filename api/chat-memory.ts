@@ -21,7 +21,7 @@ export default async function handler(req: Request): Promise<Response> {
     return new Response('Method not allowed', { status: 405 })
   }
 
-  const key = process.env.OPENROUTER_API_KEY
+  const key = process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_KEY
   if (!key || key === 'undefined') {
     return new Response(JSON.stringify({ error: 'OpenRouter key not configured' }), {
       status: 500,
