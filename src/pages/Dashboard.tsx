@@ -12,6 +12,7 @@ import {
   useDegradationWarning,
   useXPProgress,
 } from '@/hooks/useLifeQuest'
+import { isHabitScheduledForDate, localYmd } from '@/lib/date'
 import type { User } from '@/types'
 import { SPHERE_COLORS, SPHERE_LABELS, type Sphere } from '@/types'
 
@@ -87,6 +88,8 @@ export default function Dashboard({ user }: DashboardProps) {
   const { isTrialActive, daysLeft } = usePlan(user.id)
   const { quests, loading: questsLoading } = useQuests(user.id)
   const { habits, todayLogs, toggleHabit, loading: habitsLoading } = useHabits()
+  const todayYmd = localYmd()
+  const habitsToday = habits.filter(h => isHabitScheduledForDate(h, todayYmd))
   const { warning, isDegrading } = useDegradationWarning(character?.last_active)
 
   const showTrialBadge = user.plan === 'trial' && isTrialActive && daysLeft > 0
@@ -329,7 +332,7 @@ export default function Dashboard({ user }: DashboardProps) {
             <p className="text-sm text-gray-400 mb-2">Привычки</p>
             {habitsLoading ? (
               <p className="text-gray-600 text-sm">Загрузка…</p>
-            ) : habits.length === 0 ? (
+            ) : habitsToday.length === 0 ? (
               <button
                 type="button"
                 onClick={() => navigate('/habits')}
@@ -339,7 +342,7 @@ export default function Dashboard({ user }: DashboardProps) {
               </button>
             ) : (
               <div className="space-y-2">
-                {habits.map(habit => {
+                {habitsToday.map(habit => {
                   const done = todayLogs[habit.id] ?? false
                   const color = SPHERE_COLORS[habit.sphere as Sphere] ?? '#7F77DD'
                   return (

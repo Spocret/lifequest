@@ -15,6 +15,7 @@ import type {
   User, Character, JournalEntry, Habit,
   Quest, FeatureKey, PlanStatus, ReferralStats
 } from '@/types'
+import { localYmd } from '@/lib/date'
 
 /** Matches onboarding first quest title (`Onboarding.insertFirstQuest`). */
 const FIRST_JOURNAL_QUEST_TITLE = 'Один честный ответ'
@@ -272,10 +273,10 @@ function initialWeekMarks(): WeekDayMark[] {
 function useHabitsInternal(userId: string | undefined) {
   const [habits, setHabits] = useState<Habit[]>([])
   const [todayLogs, setTodayLogs] = useState<Record<string, boolean>>({})
+  const [completionCounts, setCompletionCounts] = useState<Record<string, number>>({})
   const [weekMarks, setWeekMarks] = useState<WeekDayMark[]>(initialWeekMarks)
   const [loading, setLoading] = useState(true)
 
-  const today = new Date().toISOString().split('T')[0]
   const fetchSeq = useRef(0)
 
   const fetchWeekMarks = useCallback(
@@ -310,14 +311,32 @@ function useHabitsInternal(userId: string | undefined) {
     [],
   )
 
+  const loadLogsForDate = useCallback(async (dateStr: string) => {
+    if (!userId) return {}
+    const { data, error } = await supabase
+      .from('habit_logs')
+      .select('habit_id, completed')
+      .eq('date', dateStr)
+    if (error) {
+      console.error('habit_logs:', error)
+      return {}
+    }
+    const logs: Record<string, boolean> = {}
+    data?.forEach(l => {
+      logs[l.habit_id] = l.completed
+    })
+    return logs
+  }, [userId])
+
   const fetchHabits = useCallback(async () => {
     if (!userId) return
     const seq = ++fetchSeq.current
+    const todayStr = localYmd()
     setLoading(true)
     try {
       const [habitsRes, logsRes] = await Promise.all([
         supabase.from('habits').select('*').eq('user_id', userId).order('created_at'),
-        supabase.from('habit_logs').select('habit_id, completed').eq('date', today),
+        supabase.from('habit_logs').select('habit_id, completed').eq('date', todayStr),
       ])
       if (seq !== fetchSeq.current) return
       if (habitsRes.error) throw habitsRes.error
@@ -328,6 +347,26 @@ function useHabitsInternal(userId: string | undefined) {
         logs[l.habit_id] = l.completed
       })
       setTodayLogs(logs)
+
+      const ids = list.map(h => h.id)
+      if (ids.length > 0) {
+        const { data: countRows, error: countErr } = await supabase
+          .from('habit_logs')
+          .select('habit_id')
+          .eq('completed', true)
+          .in('habit_id', ids)
+        if (seq !== fetchSeq.current) return
+        if (!countErr && countRows) {
+          const c: Record<string, number> = {}
+          countRows.forEach(r => {
+            c[r.habit_id] = (c[r.habit_id] ?? 0) + 1
+          })
+          setCompletionCounts(c)
+        }
+      } else {
+        setCompletionCounts({})
+      }
+
       await fetchWeekMarks(list)
     } catch (e) {
       if (seq !== fetchSeq.current) return
@@ -336,7 +375,7 @@ function useHabitsInternal(userId: string | undefined) {
       if (seq !== fetchSeq.current) return
       setLoading(false)
     }
-  }, [userId, today, fetchWeekMarks])
+  }, [userId, fetchWeekMarks])
 
   useEffect(() => {
     void fetchHabits()
@@ -350,6 +389,7 @@ function useHabitsInternal(userId: string | undefined) {
       const habit = habits.find(h => h.id === habitId) ?? null
       if (!habit) return { completed: false, habit: null, streakBonus: false }
 
+      const todayStr = localYmd()
       const isDone = todayLogs[habitId]
       const prevLogs = { ...todayLogs }
       const prevHabits = habits.map(h => ({ ...h }))
@@ -358,14 +398,14 @@ function useHabitsInternal(userId: string | undefined) {
 
       try {
         if (isDone) {
-          await supabase.from('habit_logs').delete().eq('habit_id', habitId).eq('date', today)
+          await supabase.from('habit_logs').delete().eq('habit_id', habitId).eq('date', todayStr)
 
           const { data: prevRow } = await supabase
             .from('habit_logs')
             .select('date')
             .eq('habit_id', habitId)
             .eq('completed', true)
-            .neq('date', today)
+            .neq('date', todayStr)
             .order('date', { ascending: false })
             .limit(1)
 
@@ -379,13 +419,17 @@ function useHabitsInternal(userId: string | undefined) {
 
           const updated: Habit = { ...habit, streak: newStreak, last_done: newLastDone }
           setHabits(prev => prev.map(h => (h.id === habitId ? updated : h)))
+          setCompletionCounts(prev => ({
+            ...prev,
+            [habitId]: Math.max(0, (prev[habitId] ?? 0) - 1),
+          }))
           await fetchWeekMarks(habits.map(h => (h.id === habitId ? updated : h)))
           return { completed: false, habit: updated, streakBonus: false }
         }
 
-        await supabase.from('habit_logs').upsert({ habit_id: habitId, date: today, completed: true })
+        await supabase.from('habit_logs').upsert({ habit_id: habitId, date: todayStr, completed: true })
 
-        const y = new Date(today + 'T12:00:00')
+        const y = new Date(todayStr + 'T12:00:00')
         y.setDate(y.getDate() - 1)
         const yStr = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, '0')}-${String(y.getDate()).padStart(2, '0')}`
 
@@ -394,7 +438,7 @@ function useHabitsInternal(userId: string | undefined) {
           newStreak = 1
         } else if (habit.last_done === yStr) {
           newStreak = habit.streak + 1
-        } else if (habit.last_done === today) {
+        } else if (habit.last_done === todayStr) {
           newStreak = habit.streak
         } else {
           newStreak = 1
@@ -402,13 +446,17 @@ function useHabitsInternal(userId: string | undefined) {
 
         await supabase
           .from('habits')
-          .update({ streak: newStreak, last_done: today })
+          .update({ streak: newStreak, last_done: todayStr })
           .eq('id', habitId)
 
-        const updated: Habit = { ...habit, streak: newStreak, last_done: today }
+        const updated: Habit = { ...habit, streak: newStreak, last_done: todayStr }
         setHabits(prev => prev.map(h => (h.id === habitId ? updated : h)))
 
         const streakBonus = newStreak > 0 && newStreak % 7 === 0
+        setCompletionCounts(prev => ({
+          ...prev,
+          [habitId]: (prev[habitId] ?? 0) + 1,
+        }))
         await fetchWeekMarks(habits.map(h => (h.id === habitId ? updated : h)))
         return { completed: true, habit: updated, streakBonus }
       } catch (e) {
@@ -418,15 +466,21 @@ function useHabitsInternal(userId: string | undefined) {
         return { completed: false, habit, streakBonus: false }
       }
     },
-    [habits, todayLogs, today, fetchWeekMarks],
+    [habits, todayLogs, fetchWeekMarks],
   )
 
   const addHabit = useCallback(
-    async (name: string, sphere: string, frequency: 'daily' | 'weekly' = 'daily') => {
+    async (name: string, sphere: string, weekdays: number[]) => {
       if (!userId) return
       const { data, error } = await supabase
         .from('habits')
-        .insert({ user_id: userId, name, sphere, frequency })
+        .insert({
+          user_id: userId,
+          name,
+          sphere,
+          frequency: 'daily',
+          weekdays,
+        })
         .select()
         .single()
       if (error) throw error
@@ -441,7 +495,17 @@ function useHabitsInternal(userId: string | undefined) {
     [userId, fetchWeekMarks, fetchHabits],
   )
 
-  return { habits, todayLogs, weekMarks, loading, toggleHabit, addHabit, refetch: fetchHabits }
+  return {
+    habits,
+    todayLogs,
+    completionCounts,
+    weekMarks,
+    loading,
+    toggleHabit,
+    addHabit,
+    loadLogsForDate,
+    refetch: fetchHabits,
+  }
 }
 
 // ─────────────────────────────────────────────────────────────

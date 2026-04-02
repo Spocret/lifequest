@@ -50,6 +50,8 @@ export interface Habit {
   name: string
   sphere: string
   frequency: 'daily' | 'weekly'
+  /** 1 = Monday … 7 = Sunday; from DB, defaults to all days if missing */
+  weekdays: number[] | null
   streak: number
   last_done: string | null
   created_at: string

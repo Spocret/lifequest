@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { useVisualViewportInset } from '@/hooks/useVisualViewportInset'
 import { useHabits, useCharacter, useFloatingXP } from '@/hooks/useLifeQuest'
+import { isHabitScheduledForDate, localYmd } from '@/lib/date'
 import { canUse } from '@/lib/access'
 import { SPHERE_COLORS, SPHERE_LABELS, type Sphere } from '@/types'
 import type { Character } from '@/types'
@@ -39,6 +40,14 @@ const SPHERE_STAT: Record<Sphere, keyof Pick<Character, 'mind' | 'body' | 'spiri
   resource: 'resource',
 }
 
+const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as const
+const WEEKDAY_SHORT_RU = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'] as const
+
+function toggleWeekday(prev: number[], d: number): number[] {
+  const next = prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]
+  return next.sort((a, b) => a - b)
+}
+
 function LockIcon() {
   return (
     <svg width="48" height="48" viewBox="0 0 24 24" fill="none" className="text-accent" aria-hidden>
@@ -57,7 +66,19 @@ function LockIcon() {
 export default function Habits({ user }: HabitsProps) {
   const navigate = useNavigate()
   const { bottomInset, height: vvHeight } = useVisualViewportInset()
-  const { habits, todayLogs, weekMarks, loading, toggleHabit, addHabit } = useHabits()
+  const {
+    habits,
+    todayLogs,
+    weekMarks,
+    loading,
+    toggleHabit,
+    addHabit,
+    completionCounts,
+    loadLogsForDate,
+  } = useHabits()
+  const todayYmd = localYmd()
+  const [viewDate, setViewDate] = useState(() => localYmd())
+  const [viewLogs, setViewLogs] = useState<Record<string, boolean>>({})
   const { gainXP } = useCharacter(user.id)
   const { items: xpItems, show: showXP } = useFloatingXP()
 
@@ -65,10 +86,28 @@ export default function Habits({ user }: HabitsProps) {
   const [showPaywall, setShowPaywall] = useState(false)
   const [newName, setNewName] = useState('')
   const [newSphere, setNewSphere] = useState<Sphere>('mind')
-  const [frequency, setFrequency] = useState<'daily' | 'weekly'>('daily')
+  const [newWeekdays, setNewWeekdays] = useState<number[]>([...ALL_WEEKDAYS])
   const [saving, setSaving] = useState(false)
 
-  const today = new Date().toISOString().split('T')[0]
+  useEffect(() => {
+    if (viewDate === todayYmd) {
+      setViewLogs(todayLogs)
+    }
+  }, [viewDate, todayLogs, todayYmd])
+
+  useEffect(() => {
+    if (viewDate === todayYmd) return
+    let cancelled = false
+    void loadLogsForDate(viewDate).then(logs => {
+      if (!cancelled) setViewLogs(logs)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [viewDate, todayYmd, loadLogsForDate])
+
+  const visibleHabits = habits.filter(h => isHabitScheduledForDate(h, viewDate))
+  const canToggle = viewDate === todayYmd
 
   async function handleToggle(id: string) {
     const result = await toggleHabit(id)
@@ -97,10 +136,11 @@ export default function Habits({ user }: HabitsProps) {
         setShowPaywall(true)
         return
       }
-      await addHabit(trimmed, newSphere, frequency)
+      if (newWeekdays.length === 0) return
+      await addHabit(trimmed, newSphere, newWeekdays)
       setNewName('')
       setNewSphere('mind')
-      setFrequency('daily')
+      setNewWeekdays([...ALL_WEEKDAYS])
       setShowAdd(false)
     } catch (e) {
       console.error(e)
@@ -113,7 +153,7 @@ export default function Habits({ user }: HabitsProps) {
     setShowAdd(false)
     setNewName('')
     setNewSphere('mind')
-    setFrequency('daily')
+    setNewWeekdays([...ALL_WEEKDAYS])
   }
 
   return (
@@ -139,9 +179,17 @@ export default function Habits({ user }: HabitsProps) {
         <p className="text-xs text-gray-500 mb-3">Неделя</p>
         <div className="flex gap-1.5">
           {weekMarks.map(mark => {
-            const isToday = mark.date === today
+            const isToday = mark.date === todayYmd
+            const isSelected = mark.date === viewDate
             return (
-              <div key={mark.date} className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
+              <button
+                key={mark.date}
+                type="button"
+                onClick={() => setViewDate(mark.date)}
+                className="flex-1 flex flex-col items-center gap-1.5 min-w-0 rounded-lg py-1 -my-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/60"
+                aria-pressed={isSelected}
+                aria-label={`${mark.short}, ${mark.date}`}
+              >
                 <span
                   className={`text-[10px] uppercase tracking-wide ${isToday ? 'text-violet-300' : 'text-gray-500'}`}
                 >
@@ -151,20 +199,20 @@ export default function Habits({ user }: HabitsProps) {
                   className="w-full h-2 rounded-full overflow-hidden"
                   style={{
                     background: 'rgba(255,255,255,0.08)',
-                    boxShadow: isToday ? '0 0 0 1px rgba(127,119,221,0.5)' : undefined,
+                    boxShadow: isSelected ? '0 0 0 1px rgba(34,197,94,0.55)' : isToday ? '0 0 0 1px rgba(127,119,221,0.5)' : undefined,
                   }}
                 >
                   <motion.div
                     className="h-full rounded-full"
                     initial={false}
                     animate={{
-                      width: mark.filled ? '100%' : '0%',
-                      backgroundColor: mark.filled ? '#22c55e' : 'transparent',
+                      width: isSelected || mark.filled ? '100%' : '0%',
+                      backgroundColor: isSelected ? '#22c55e' : mark.filled ? '#22c55e' : 'transparent',
                     }}
                     transition={{ duration: 0.35 }}
                   />
                 </div>
-              </div>
+              </button>
             )
           })}
         </div>
@@ -180,14 +228,18 @@ export default function Habits({ user }: HabitsProps) {
               transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
             />
           </div>
-        ) : habits.length === 0 ? (
+        ) : visibleHabits.length === 0 ? (
           <div className="text-center py-16 text-gray-500 px-4">
             <Flame size={40} className="mx-auto mb-3 opacity-25 text-violet-400" />
-            <p className="text-base leading-relaxed">Добавь первый ритуал. Архитектор запомнит.</p>
+            <p className="text-base leading-relaxed">
+              {habits.length === 0
+                ? 'Добавь первый ритуал. Архитектор запомнит.'
+                : 'На этот день ничего не запланировано. Поменяй день недели или расписание привычки.'}
+            </p>
           </div>
         ) : (
-          habits.map(habit => {
-            const done = todayLogs[habit.id] ?? false
+          visibleHabits.map(habit => {
+            const done = viewLogs[habit.id] ?? false
             const color = SPHERE_COLORS[habit.sphere as Sphere] ?? '#7F77DD'
             const SphereIc = SPHERE_ICON[habit.sphere as Sphere] ?? Brain
             return (
@@ -210,9 +262,13 @@ export default function Habits({ user }: HabitsProps) {
                   <p className={`font-medium truncate ${done ? 'line-through text-gray-500' : 'text-white'}`}>
                     {habit.name}
                   </p>
-                  <div className="flex items-center gap-1.5 mt-0.5 text-xs text-orange-400/95">
+                  <div className="flex items-center gap-1.5 mt-0.5 text-xs text-orange-400/95 flex-wrap">
                     <Flame size={14} className="shrink-0" />
                     <span className="tabular-nums font-medium">{habit.streak}</span>
+                    <span className="text-gray-600 mx-0.5">·</span>
+                    <span className="text-gray-500 tabular-nums">
+                      {completionCounts[habit.id] ?? 0} раз
+                    </span>
                     <span className="text-gray-600 mx-0.5">·</span>
                     <span className="text-gray-500 truncate">{SPHERE_LABELS[habit.sphere as Sphere]}</span>
                   </div>
@@ -221,13 +277,15 @@ export default function Habits({ user }: HabitsProps) {
                   type="button"
                   role="checkbox"
                   aria-checked={done}
-                  onClick={() => handleToggle(habit.id)}
-                  className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 border"
+                  aria-disabled={!canToggle}
+                  disabled={!canToggle}
+                  onClick={() => canToggle && handleToggle(habit.id)}
+                  className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 border disabled:opacity-40 disabled:cursor-not-allowed"
                   style={{
                     background: done ? color : 'rgba(255,255,255,0.06)',
                     borderColor: done ? color : 'rgba(255,255,255,0.12)',
                   }}
-                  whileTap={{ scale: 0.92 }}
+                  whileTap={canToggle ? { scale: 0.92 } : undefined}
                 >
                   {done && <Check size={22} className="text-white" strokeWidth={2.5} />}
                 </motion.button>
@@ -362,37 +420,58 @@ export default function Habits({ user }: HabitsProps) {
                   })}
                 </div>
 
-                <p className="text-xs text-gray-500 mb-2">Частота</p>
-                <div className="flex rounded-xl p-1 mb-2" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                <p className="text-xs text-gray-500 mb-2">Дни недели</p>
+                <div className="flex flex-wrap gap-2 mb-3">
                   <button
                     type="button"
-                    onClick={() => setFrequency('daily')}
-                    className="flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors"
-                    style={{
-                      background: frequency === 'daily' ? '#534AB7' : 'transparent',
-                      color: frequency === 'daily' ? '#fff' : '#9ca3af',
-                    }}
+                    onClick={() => setNewWeekdays([...ALL_WEEKDAYS])}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-gray-300"
                   >
-                    Каждый день
+                    Все дни
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFrequency('weekly')}
-                    className="flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors"
-                    style={{
-                      background: frequency === 'weekly' ? '#534AB7' : 'transparent',
-                      color: frequency === 'weekly' ? '#fff' : '#9ca3af',
-                    }}
+                    onClick={() => setNewWeekdays([1, 2, 3, 4, 5])}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-gray-300"
                   >
-                    Раз в неделю
+                    Пн–Пт
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewWeekdays([6, 7])}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-gray-300"
+                  >
+                    Выходные
                   </button>
                 </div>
+                <div className="grid grid-cols-7 gap-1.5 mb-2">
+                  {ALL_WEEKDAYS.map(d => {
+                    const active = newWeekdays.includes(d)
+                    return (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setNewWeekdays(prev => toggleWeekday(prev, d))}
+                        className="py-2.5 rounded-xl text-xs font-semibold transition-all"
+                        style={{
+                          background: active ? '#534AB7' : 'rgba(255,255,255,0.06)',
+                          color: active ? '#fff' : '#9ca3af',
+                        }}
+                      >
+                        {WEEKDAY_SHORT_RU[d - 1]}
+                      </button>
+                    )
+                  })}
+                </div>
+                {newWeekdays.length === 0 && (
+                  <p className="text-xs text-amber-500/90 mb-2">Выбери хотя бы один день</p>
+                )}
               </div>
               <div className="flex-shrink-0 px-6 pt-2 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]">
                 <motion.button
                   type="button"
                   onClick={handleAdd}
-                  disabled={!newName.trim() || saving}
+                  disabled={!newName.trim() || saving || newWeekdays.length === 0}
                   className="w-full py-4 rounded-2xl font-semibold text-white disabled:opacity-40"
                   style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
                   whileTap={{ scale: 0.97 }}
