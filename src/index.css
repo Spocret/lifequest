@@ -17,6 +17,7 @@ body {
   color: #ffffff;
   min-height: 100dvh;
   overscroll-behavior: none;
+  touch-action: manipulation;
 }
 
 @layer utilities {

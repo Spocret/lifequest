@@ -1,4 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  createContext,
+  useContext,
+  createElement,
+  type ReactNode,
+} from 'react'
 import { supabase } from '@/lib/supabase'
 import { getPlanStatus, canUse } from '@/lib/access'
 import { getReferralStats, activateReferral } from '@/lib/referral'
@@ -260,7 +269,7 @@ function initialWeekMarks(): WeekDayMark[] {
   return dates.map((date, i) => ({ short: WEEK_SHORT_RU[i], date, filled: false }))
 }
 
-export function useHabits(userId: string | undefined) {
+function useHabitsInternal(userId: string | undefined) {
   const [habits, setHabits] = useState<Habit[]>([])
   const [todayLogs, setTodayLogs] = useState<Record<string, boolean>>({})
   const [weekMarks, setWeekMarks] = useState<WeekDayMark[]>(initialWeekMarks)
@@ -433,6 +442,25 @@ export function useHabits(userId: string | undefined) {
   )
 
   return { habits, todayLogs, weekMarks, loading, toggleHabit, addHabit, refetch: fetchHabits }
+}
+
+// ─────────────────────────────────────────────────────────────
+// HABITS CONTEXT (shared across tabs — survives route changes)
+// ─────────────────────────────────────────────────────────────
+
+export type HabitsContextValue = ReturnType<typeof useHabitsInternal>
+
+const HabitsContext = createContext<HabitsContextValue | null>(null)
+
+export function HabitsProvider({ userId, children }: { userId: string; children: ReactNode }) {
+  const value = useHabitsInternal(userId)
+  return createElement(HabitsContext.Provider, { value }, children)
+}
+
+export function useHabits() {
+  const ctx = useContext(HabitsContext)
+  if (!ctx) throw new Error('useHabits must be used within HabitsProvider')
+  return ctx
 }
 
 // ─────────────────────────────────────────────────────────────

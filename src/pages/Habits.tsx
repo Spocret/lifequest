@@ -57,7 +57,7 @@ function LockIcon() {
 export default function Habits({ user }: HabitsProps) {
   const navigate = useNavigate()
   const { bottomInset, height: vvHeight } = useVisualViewportInset()
-  const { habits, todayLogs, weekMarks, loading, toggleHabit, addHabit } = useHabits(user.id)
+  const { habits, todayLogs, weekMarks, loading, toggleHabit, addHabit } = useHabits()
   const { gainXP } = useCharacter(user.id)
   const { items: xpItems, show: showXP } = useFloatingXP()
 

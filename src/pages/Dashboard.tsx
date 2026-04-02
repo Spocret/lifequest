@@ -86,7 +86,7 @@ export default function Dashboard({ user }: DashboardProps) {
   const { character, loading: charLoading } = useCharacter(user.id)
   const { isTrialActive, daysLeft } = usePlan(user.id)
   const { quests, loading: questsLoading } = useQuests(user.id)
-  const { habits, todayLogs, toggleHabit, loading: habitsLoading } = useHabits(user.id)
+  const { habits, todayLogs, toggleHabit, loading: habitsLoading } = useHabits()
   const { warning, isDegrading } = useDegradationWarning(character?.last_active)
 
   const showTrialBadge = user.plan === 'trial' && isTrialActive && daysLeft > 0

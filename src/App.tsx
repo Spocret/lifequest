@@ -2,6 +2,7 @@ import { useState, useEffect, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { initTelegramAuth, type AuthResult } from './lib/auth'
+import { HabitsProvider } from './hooks/useLifeQuest'
 import BottomNav from './components/BottomNav'
 import Onboarding from './pages/Onboarding'
 import Dashboard from './pages/Dashboard'
@@ -126,7 +127,8 @@ function AppRoutes() {
   )
 
   return (
-    <AppLayout>
+    <HabitsProvider userId={user.id}>
+      <AppLayout>
       <Routes>
         {/* Root: redirect based on auth state */}
         <Route
@@ -156,7 +158,8 @@ function AppRoutes() {
           element={<Navigate to={isReady ? '/dashboard' : '/onboarding'} replace />}
         />
       </Routes>
-    </AppLayout>
+      </AppLayout>
+    </HabitsProvider>
   )
 }
 
