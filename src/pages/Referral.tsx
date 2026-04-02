@@ -33,7 +33,7 @@ export default function Referral({ user }: ReferralProps) {
   }
 
   return (
-    <div className="min-h-dvh bg-background flex flex-col px-4 pt-safe">
+    <div className="min-h-dvh bg-background flex flex-col px-4 pt-safe pb-[calc(4rem+env(safe-area-inset-bottom,0px)+1.5rem)]">
       <div className="flex items-center gap-3 mb-6">
         <button onClick={() => navigate(-1)} className="p-2 rounded-xl bg-white/5">
           <ArrowLeft size={20} />
