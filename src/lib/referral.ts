@@ -3,7 +3,11 @@ import type { ReferralStats } from '@/types'
 
 type MilestoneReward = { days: number; title?: string; artifact?: string }
 
-const BOT_START_URL = 'https://t.me/LifeQuestBot?start='
+/** Must match @BotFather username (no @). Same value as TELEGRAM_BOT_USERNAME on the server. */
+function telegramBotUsername(): string {
+  const raw = (import.meta.env.VITE_TELEGRAM_BOT_USERNAME as string | undefined)?.trim() || 'LifeQuestRPGbot'
+  return raw.replace(/^@/, '')
+}
 const APPLY_REFERRAL_TRIAL_BONUS_DAYS = 2
 
 const MILESTONES = [
@@ -26,7 +30,8 @@ export function getMilestoneReward(n: number): MilestoneReward {
 }
 
 export function buildReferralLink(refCode: string): string {
-  return `${BOT_START_URL}${encodeURIComponent(refCode)}`
+  const bot = telegramBotUsername()
+  return `https://t.me/${bot}?start=${encodeURIComponent(refCode)}`
 }
 
 export async function createReferralLink(userId: string): Promise<string> {

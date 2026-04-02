@@ -13,6 +13,12 @@ type TgUpdate = {
   }
 }
 
+/** Must match @BotFather username (no @). Same as VITE_TELEGRAM_BOT_USERNAME in the client bundle. */
+function getBotUsername(): string {
+  const raw = (process.env.TELEGRAM_BOT_USERNAME || process.env.VITE_TELEGRAM_BOT_USERNAME || 'LifeQuestRPGbot').trim()
+  return raw.replace(/^@/, '')
+}
+
 function getAppUrl(): string {
   const raw = (process.env.APP_URL || process.env.VITE_APP_URL || '').trim()
   if (raw && raw !== 'undefined') {
@@ -29,13 +35,12 @@ function getAppUrl(): string {
 }
 
 function parseStartRef(text: string): string | null {
-  // "/start ref_xxx" or "/start@BotName ref_xxx"
+  // "/start ref_xxx" or "/start@BotName ref_xxx" — payload must match users.ref_code (full token).
   const m = text.trim().match(/^\/start(?:@\w+)?(?:\s+([^\s]+))?$/i)
   const param = m?.[1]?.trim()
   if (!param) return null
   if (!param.startsWith('ref_')) return null
-  const code = param.slice('ref_'.length)
-  return code ? code : null
+  return param
 }
 
 function jsonResponse(body: unknown, init?: ResponseInit): Response {
@@ -69,7 +74,7 @@ function mainMenuButtons(appUrl: string): InlineButton[][] {
       { text: '📝 Фидбек', callback_data: 'menu:feedback' },
     ],
     [{ text: '❓ Помощь', callback_data: 'menu:help' }],
-    [{ text: 'Открыть приложение', url: appUrl }],
+    [{ text: 'Открыть приложение', web_app: { url: appUrl } }],
   ]
 }
 
@@ -143,7 +148,7 @@ async function handleTelegramUpdate(update: TgUpdate): Promise<Response> {
       await sendTelegramMessage(cbChatId, 'Открой приложение, чтобы посмотреть квесты.', {
         parseMode: null,
         buttons: [
-          [{ text: 'Открыть приложение', url: appUrl }],
+          [{ text: 'Открыть приложение', web_app: { url: appUrl } }],
           [{ text: '⬅️ Меню', callback_data: 'menu:root' }],
         ],
       })
@@ -179,7 +184,7 @@ async function handleTelegramUpdate(update: TgUpdate): Promise<Response> {
       await sendTelegramMessage(cbChatId, 'Ок, поставил напоминание.', {
         parseMode: null,
         buttons: [
-          [{ text: 'Открыть приложение', url: appUrl }],
+          [{ text: 'Открыть приложение', web_app: { url: appUrl } }],
           [{ text: '⬅️ Меню', callback_data: 'menu:root' }],
         ],
       })
@@ -224,7 +229,8 @@ async function handleTelegramUpdate(update: TgUpdate): Promise<Response> {
     if (cbData === 'menu:ref') {
       const { data: u } = await supabase.from('users').select('ref_code, referral_code').eq('tg_id', cbChatId).maybeSingle()
       const code = String((u as any)?.ref_code ?? (u as any)?.referral_code ?? '')
-      const link = code ? `https://t.me/LifeQuestBot?start=${encodeURIComponent(code)}` : ''
+      const bot = getBotUsername()
+      const link = code ? `https://t.me/${bot}?start=${encodeURIComponent(code)}` : ''
       await sendTelegramMessage(cbChatId, link ? `Твоя ссылка:\n${link}` : 'Не нашёл реферальный код. Зайди в приложение и попробуй ещё раз.', {
         parseMode: null,
         buttons: [
@@ -326,7 +332,7 @@ async function handleTelegramUpdate(update: TgUpdate): Promise<Response> {
     await sendTelegramMessage(tgId, welcomeText, {
       parseMode: null,
       buttons: [
-        [{ text: 'Открыть приложение', url: webAppUrl }],
+        [{ text: 'Открыть приложение', web_app: { url: webAppUrl } }],
         [{ text: '📋 Меню', callback_data: 'menu:root' }],
       ],
     })
