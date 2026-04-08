@@ -4,7 +4,6 @@ import { motion } from 'framer-motion'
 import { ArrowLeft, Check, Flame, Pencil, Trash2, Archive, ArchiveRestore } from 'lucide-react'
 import { useHabits } from '@/hooks/useLifeQuest'
 import { SPHERE_COLORS, SPHERE_LABELS, type Sphere } from '@/types'
-import type { Habit } from '@/types'
 
 const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as const
 const WEEKDAY_SHORT_RU = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'] as const
@@ -42,6 +41,7 @@ export default function HabitDetails() {
   } = useHabits()
 
   const habit = useMemo(() => habits.find(h => h.id === id) ?? null, [habits, id])
+  const habitId = habit?.id ?? null
   const [history, setHistory] = useState<Set<string>>(() => new Set())
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -61,25 +61,25 @@ export default function HabitDetails() {
   }, [habit])
 
   useEffect(() => {
-    if (!habit) return
+    if (!habitId) return
     let cancelled = false
     const end = ymdFromDate(new Date())
     const start = ymdMinusDays(end, 89)
-    void loadHabitCompletionsInRange(habit.id, start, end).then(set => {
+    void loadHabitCompletionsInRange(habitId, start, end).then(set => {
       if (!cancelled) setHistory(set)
     })
     return () => { cancelled = true }
-  }, [habit, loadHabitCompletionsInRange])
+  }, [habitId, loadHabitCompletionsInRange])
 
   useEffect(() => {
-    if (!habit) return
+    if (!habitId) return
     let cancelled = false
-    void getHabitReminder(habit.id).then(r => {
+    void getHabitReminder(habitId).then(r => {
       if (cancelled) return
       setReminderEnabled(Boolean(r?.enabled))
     })
     return () => { cancelled = true }
-  }, [habit, getHabitReminder])
+  }, [habitId, getHabitReminder])
 
   if (!habit) {
     return (
@@ -99,11 +99,12 @@ export default function HabitDetails() {
   const isArchived = Boolean(habit.archived_at)
 
   async function save() {
+    if (!habitId) return
     const trimmed = name.trim()
     if (!trimmed || saving || weekdays.length === 0) return
     setSaving(true)
     try {
-      await updateHabit(habit.id, trimmed, sphere, weekdays)
+      await updateHabit(habitId, trimmed, sphere, weekdays)
       setEditing(false)
     } finally {
       setSaving(false)
@@ -111,10 +112,11 @@ export default function HabitDetails() {
   }
 
   async function toggleArchive() {
+    if (!habitId) return
     if (saving) return
     setSaving(true)
     try {
-      await bulkUpdateHabits([habit.id], { archived_at: isArchived ? null : new Date().toISOString() })
+      await bulkUpdateHabits([habitId], { archived_at: isArchived ? null : new Date().toISOString() })
       navigate(-1)
     } finally {
       setSaving(false)
@@ -122,11 +124,12 @@ export default function HabitDetails() {
   }
 
   async function remove() {
+    if (!habitId) return
     const ok = window.confirm('Удалить привычку и все отметки выполнения без восстановления?')
     if (!ok) return
     setSaving(true)
     try {
-      await deleteHabit(habit.id)
+      await deleteHabit(habitId)
       navigate('/habits')
     } finally {
       setSaving(false)
@@ -134,11 +137,11 @@ export default function HabitDetails() {
   }
 
   async function toggleReminder() {
-    if (reminderBusy || !habit) return
+    if (reminderBusy || !habitId) return
     setReminderBusy(true)
     try {
       const next = !reminderEnabled
-      await setHabitReminderEnabled(habit.id, next)
+      await setHabitReminderEnabled(habitId, next)
       setReminderEnabled(next)
     } finally {
       setReminderBusy(false)
