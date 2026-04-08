@@ -1,15 +1,7 @@
 import { type ReactNode, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { canUse, type FeatureKey } from '@/lib/access'
-
-const FEATURE_TITLES: Record<FeatureKey, string> = {
-  journal_entry: 'Записи в дневнике',
-  journal_ai: 'ИИ-вопрос после записи',
-  habit_add: 'Новые привычки',
-  ai_chat: 'ИИ-наставник',
-  weekly_insight: 'Еженедельный инсайт',
-  history: 'Полная история',
-}
+import { FEATURE_TITLES, PAYWALL_CTA, PAYWALL_MESSAGE } from '@/components/paywallCopy'
 
 function LockIcon() {
   return (
@@ -79,14 +71,14 @@ export default function Paywall({ feature, userId, children, className }: Paywal
       <LockIcon />
       <h2 className="text-lg font-semibold text-white">{FEATURE_TITLES[feature]}</h2>
       <p className="text-sm text-gray-400 italic max-w-xs leading-relaxed">
-        Эта часть пути открыта тем кто продолжает
+        {PAYWALL_MESSAGE}
       </p>
       <Link
         to="/upgrade"
         className="mt-2 w-full max-w-xs py-3.5 rounded-2xl font-semibold text-white text-center"
         style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
       >
-        ✦ Открыть Pro 490 ₽/мес
+        {PAYWALL_CTA}
       </Link>
     </div>
   )

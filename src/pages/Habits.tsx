@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft,
@@ -18,6 +18,7 @@ import { useVisualViewportInset } from '@/hooks/useVisualViewportInset'
 import { useHabits, useCharacter, useFloatingXP } from '@/hooks/useLifeQuest'
 import { isHabitScheduledForDate, localYmd } from '@/lib/date'
 import { canUse } from '@/lib/access'
+import PaywallModal from '@/components/PaywallModal'
 import { SPHERE_COLORS, SPHERE_LABELS, type Sphere } from '@/types'
 import type { Character, Habit } from '@/types'
 import type { User } from '@/types'
@@ -50,19 +51,13 @@ function toggleWeekday(prev: number[], d: number): number[] {
   return next.sort((a, b) => a - b)
 }
 
-function LockIcon() {
-  return (
-    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" className="text-accent" aria-hidden>
-      <path
-        d="M7 11V8a5 5 0 0 1 10 0v3"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-      <rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="12" cy="16" r="1" fill="currentColor" />
-    </svg>
-  )
+function ymdMinusDays(ymd: string, days: number): string {
+  const d = new Date(ymd + 'T12:00:00')
+  d.setDate(d.getDate() - days)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
 }
 
 export default function Habits({ user }: HabitsProps) {
@@ -83,6 +78,7 @@ export default function Habits({ user }: HabitsProps) {
     refetch: refetchHabits,
   } = useHabits()
   const todayYmd = localYmd()
+  const yesterdayYmd = ymdMinusDays(todayYmd, 1)
   const [viewDate, setViewDate] = useState(() => localYmd())
   const [viewLogs, setViewLogs] = useState<Record<string, boolean>>({})
   const { gainXP } = useCharacter(user.id)
@@ -97,6 +93,7 @@ export default function Habits({ user }: HabitsProps) {
   const [newSphere, setNewSphere] = useState<Sphere>('mind')
   const [newWeekdays, setNewWeekdays] = useState<number[]>([...ALL_WEEKDAYS])
   const [saving, setSaving] = useState(false)
+  const [quickAddBusy, setQuickAddBusy] = useState(false)
 
   useEffect(() => {
     if (viewDate === todayYmd) {
@@ -117,17 +114,41 @@ export default function Habits({ user }: HabitsProps) {
   }, [viewDate, todayYmd, loadLogsForDate, habits])
 
   const visibleHabits = habits.filter(h => isHabitScheduledForDate(h, viewDate))
-  const canToggle = viewDate === todayYmd
+  const canToggle = viewDate === todayYmd || viewDate === yesterdayYmd
+
+  async function quickAdd(name: string, sphere: Sphere, weekdays: number[]) {
+    if (quickAddBusy) return
+    setQuickAddBusy(true)
+    try {
+      const allowed = await canUse(user.id, 'habit_add')
+      if (!allowed) {
+        setShowPaywall(true)
+        return
+      }
+      await addHabit(name, sphere, weekdays)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setQuickAddBusy(false)
+    }
+  }
 
   async function handleToggle(id: string) {
-    const result = await toggleHabit(id)
-    if (!result.completed || !result.habit) return
+    const result = await toggleHabit(id, viewDate)
+    if (!result.habit) return
+
+    if (viewDate !== todayYmd) {
+      setViewLogs(prev => ({ ...prev, [id]: result.completed }))
+    }
+
+    if (!result.completed) return
+    if (!result.xpAwarded) return
 
     const sphere = result.habit.sphere as Sphere
     const stat = SPHERE_STAT[sphere]
 
-    await gainXP?.(30, stat, 2)
-    showXP(30, '+30 XP', 50)
+    await gainXP?.(result.xpAwarded, stat, 2)
+    showXP(result.xpAwarded, `+${result.xpAwarded} XP`, 50)
 
     if (result.streakBonus) {
       await gainXP?.(50, stat, 1)
@@ -224,6 +245,8 @@ export default function Habits({ user }: HabitsProps) {
           {weekMarks.map(mark => {
             const isToday = mark.date === todayYmd
             const isSelected = mark.date === viewDate
+            const weekLabel = mark.total === 0 ? 'нет привычек' : `${mark.done}/${mark.total}`
+            const fillPct = mark.total === 0 ? 0 : Math.round((mark.done / mark.total) * 100)
             return (
               <button
                 key={mark.date}
@@ -231,7 +254,7 @@ export default function Habits({ user }: HabitsProps) {
                 onClick={() => setViewDate(mark.date)}
                 className="flex-1 flex flex-col items-center gap-1.5 min-w-0 rounded-lg py-1 -my-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/60"
                 aria-pressed={isSelected}
-                aria-label={`${mark.short}, ${mark.date}`}
+                aria-label={`${mark.short}, ${mark.date}${isToday ? ', сегодня' : ''}${isSelected ? ', выбрано' : ''}, ${weekLabel}`}
               >
                 <span
                   className={`text-[10px] uppercase tracking-wide ${isToday ? 'text-violet-300' : 'text-gray-500'}`}
@@ -242,15 +265,19 @@ export default function Habits({ user }: HabitsProps) {
                   className="w-full h-2 rounded-full overflow-hidden"
                   style={{
                     background: 'rgba(255,255,255,0.08)',
-                    boxShadow: isSelected ? '0 0 0 1px rgba(34,197,94,0.55)' : isToday ? '0 0 0 1px rgba(127,119,221,0.5)' : undefined,
+                    boxShadow: isSelected
+                      ? '0 0 0 2px rgba(127,119,221,0.75)'
+                      : isToday
+                        ? '0 0 0 1px rgba(127,119,221,0.5)'
+                        : undefined,
                   }}
                 >
                   <motion.div
                     className="h-full rounded-full"
                     initial={false}
                     animate={{
-                      width: isSelected || mark.filled ? '100%' : '0%',
-                      backgroundColor: isSelected ? '#22c55e' : mark.filled ? '#22c55e' : 'transparent',
+                      width: `${fillPct}%`,
+                      backgroundColor: mark.total === 0 ? 'transparent' : mark.done > 0 ? '#22c55e' : 'transparent',
                     }}
                     transition={{ duration: 0.35 }}
                   />
@@ -263,6 +290,40 @@ export default function Habits({ user }: HabitsProps) {
 
       {/* Habits list */}
       <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pb-8 space-y-3">
+        {!loading && viewDate !== todayYmd && viewDate !== yesterdayYmd && (
+          <div
+            className="rounded-xl px-3 py-2 text-sm text-gray-200/95 mb-2 flex items-center justify-between gap-3"
+            style={{ background: 'rgba(127,119,221,0.12)', border: '1px solid rgba(127,119,221,0.22)' }}
+          >
+            <p className="leading-snug">
+              Этот день — для просмотра. Отмечать можно только сегодня и вчера.
+            </p>
+            <button
+              type="button"
+              className="shrink-0 text-violet-300 underline underline-offset-2"
+              onClick={() => setViewDate(todayYmd)}
+            >
+              На сегодня
+            </button>
+          </div>
+        )}
+        {!loading && viewDate === yesterdayYmd && (
+          <div
+            className="rounded-xl px-3 py-2 text-sm text-gray-200/95 mb-2 flex items-center justify-between gap-3"
+            style={{ background: 'rgba(34,197,94,0.10)', border: '1px solid rgba(34,197,94,0.20)' }}
+          >
+            <p className="leading-snug">
+              Можно отметить вчера, чтобы закрыть хвост — без лишнего давления.
+            </p>
+            <button
+              type="button"
+              className="shrink-0 text-violet-300 underline underline-offset-2"
+              onClick={() => setViewDate(todayYmd)}
+            >
+              На сегодня
+            </button>
+          </div>
+        )}
         {habitsLoadError && (
           <div
             className="rounded-xl px-3 py-2 text-sm text-amber-200/95 mb-2"
@@ -294,6 +355,46 @@ export default function Habits({ user }: HabitsProps) {
                 ? 'Добавь первый ритуал. Архитектор запомнит.'
                 : 'На этот день ничего не запланировано. Поменяй день недели или расписание привычки.'}
             </p>
+            {habits.length === 0 && (
+              <div className="mt-6 space-y-2 text-left max-w-sm mx-auto">
+                <p className="text-xs text-gray-500 px-1">Быстрый старт</p>
+                <button
+                  type="button"
+                  className="w-full rounded-2xl px-4 py-3 flex items-center justify-between gap-3 bg-white/5 border border-white/10 text-white"
+                  disabled={quickAddBusy}
+                  onClick={() => void quickAdd('10 минут ясности', 'mind', [1, 2, 3, 4, 5])}
+                >
+                  <span className="font-semibold">10 минут ясности</span>
+                  <span className="text-xs text-gray-500">Пн–Пт</span>
+                </button>
+                <button
+                  type="button"
+                  className="w-full rounded-2xl px-4 py-3 flex items-center justify-between gap-3 bg-white/5 border border-white/10 text-white"
+                  disabled={quickAddBusy}
+                  onClick={() => void quickAdd('Тело в движении (15 минут)', 'body', [2, 4, 6])}
+                >
+                  <span className="font-semibold">Тело в движении (15 минут)</span>
+                  <span className="text-xs text-gray-500">Вт/Чт/Сб</span>
+                </button>
+                <button
+                  type="button"
+                  className="w-full rounded-2xl px-4 py-3 flex items-center justify-between gap-3 bg-white/5 border border-white/10 text-white"
+                  disabled={quickAddBusy}
+                  onClick={() => void quickAdd('Тихий якорь (2 минуты)', 'spirit', [...ALL_WEEKDAYS])}
+                >
+                  <span className="font-semibold">Тихий якорь (2 минуты)</span>
+                  <span className="text-xs text-gray-500">Каждый день</span>
+                </button>
+                <button
+                  type="button"
+                  className="mt-2 w-full py-3 rounded-2xl font-semibold text-white disabled:opacity-40"
+                  style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
+                  onClick={openNewHabitSheet}
+                >
+                  Создать свою
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           visibleHabits.map(habit => {
@@ -433,47 +534,7 @@ export default function Habits({ user }: HabitsProps) {
       </AnimatePresence>
 
       {/* Paywall modal */}
-      <AnimatePresence>
-        {showPaywall && (
-          <motion.div
-            className="fixed inset-0 z-[85] flex items-center justify-center p-4 bg-black/75"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setShowPaywall(false)}
-          >
-            <motion.div
-              className="w-full max-w-sm rounded-3xl p-6 text-center"
-              style={{ background: '#12121f', border: '1px solid rgba(255,255,255,0.1)' }}
-              initial={{ scale: 0.94, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.94, opacity: 0 }}
-              onClick={e => e.stopPropagation()}
-            >
-              <LockIcon />
-              <h2 className="text-lg font-semibold text-white mt-3">Новые привычки</h2>
-              <p className="text-sm text-gray-400 italic max-w-xs mx-auto leading-relaxed mt-2">
-                Эта часть пути открыта тем кто продолжает
-              </p>
-              <Link
-                to="/upgrade"
-                className="mt-5 block w-full py-3.5 rounded-2xl font-semibold text-white"
-                style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
-                onClick={() => setShowPaywall(false)}
-              >
-                ✦ Открыть Pro 490 ₽/мес
-              </Link>
-              <button
-                type="button"
-                className="mt-3 text-sm text-gray-500"
-                onClick={() => setShowPaywall(false)}
-              >
-                Закрыть
-              </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <PaywallModal open={showPaywall} feature="habit_add" onClose={() => setShowPaywall(false)} />
 
       {/* Add habit bottom sheet */}
       <AnimatePresence>

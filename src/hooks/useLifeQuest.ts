@@ -15,7 +15,7 @@ import type {
   User, Character, JournalEntry, Habit,
   Quest, FeatureKey, PlanStatus, ReferralStats
 } from '@/types'
-import { localYmd } from '@/lib/date'
+import { isHabitScheduledForDate, localYmd } from '@/lib/date'
 import { supabaseErrorMessage } from '@/lib/supabaseError'
 
 /** Matches onboarding first quest title (`Onboarding.insertFirstQuest`). */
@@ -318,13 +318,22 @@ export type HabitToggleResult = {
   completed: boolean
   habit: Habit | null
   streakBonus: boolean
+  date: string
+  isRetro: boolean
+  xpAwarded: number
 }
 
-export type WeekDayMark = { short: string; date: string; filled: boolean }
+export type WeekDayMark = {
+  short: string
+  date: string
+  done: number
+  total: number
+  filled: boolean
+}
 
 function initialWeekMarks(): WeekDayMark[] {
   const dates = getWeekMonSunDates()
-  return dates.map((date, i) => ({ short: WEEK_SHORT_RU[i], date, filled: false }))
+  return dates.map((date, i) => ({ short: WEEK_SHORT_RU[i], date, done: 0, total: 0, filled: false }))
 }
 
 const DEFAULT_WEEKDAYS: number[] = [1, 2, 3, 4, 5, 6, 7]
@@ -346,6 +355,54 @@ function normalizeHabitRow(row: Habit): Habit {
   }
 }
 
+function ymdMinusDays(ymd: string, days: number): string {
+  const d = new Date(ymd + 'T12:00:00')
+  d.setDate(d.getDate() - days)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
+}
+
+async function recomputeStreakFromLogs(habit: Habit): Promise<{ streak: number; last_done: string | null }> {
+  const todayStr = localYmd()
+  const start = ymdMinusDays(todayStr, 120)
+  const { data, error } = await supabase
+    .from('habit_logs')
+    .select('date')
+    .eq('habit_id', habit.id)
+    .eq('completed', true)
+    .gte('date', start)
+    .lte('date', todayStr)
+    .order('date', { ascending: false })
+
+  if (error) {
+    console.error('recompute streak:', error)
+    return { streak: habit.streak, last_done: habit.last_done }
+  }
+
+  const completed = new Set((data ?? []).map(r => r.date as string))
+  const lastDone = (data?.[0]?.date as string | undefined) ?? null
+  if (!lastDone) return { streak: 0, last_done: null }
+
+  let streak = 0
+  let cur = lastDone
+  while (true) {
+    if (!isHabitScheduledForDate(habit, cur)) {
+      cur = ymdMinusDays(cur, 1)
+      continue
+    }
+    if (completed.has(cur)) {
+      streak += 1
+      cur = ymdMinusDays(cur, 1)
+      continue
+    }
+    break
+  }
+
+  return { streak, last_done: lastDone }
+}
+
 function useHabitsInternal(userId: string | undefined) {
   const [habits, setHabits] = useState<Habit[]>([])
   const [todayLogs, setTodayLogs] = useState<Record<string, boolean>>({})
@@ -360,28 +417,37 @@ function useHabitsInternal(userId: string | undefined) {
     async (habitList: Habit[]) => {
       const dates = getWeekMonSunDates()
       if (habitList.length === 0) {
-        setWeekMarks(dates.map((date, i) => ({ short: WEEK_SHORT_RU[i], date, filled: false })))
+        setWeekMarks(dates.map((date, i) => ({ short: WEEK_SHORT_RU[i], date, done: 0, total: 0, filled: false })))
         return
       }
       const ids = habitList.map(h => h.id)
       const { data, error } = await supabase
         .from('habit_logs')
-        .select('date')
+        .select('date, habit_id')
         .in('habit_id', ids)
         .eq('completed', true)
         .gte('date', dates[0])
         .lte('date', dates[6])
       if (error) {
         console.error('week marks:', error)
-        setWeekMarks(dates.map((date, i) => ({ short: WEEK_SHORT_RU[i], date, filled: false })))
+        setWeekMarks(dates.map((date, i) => ({ short: WEEK_SHORT_RU[i], date, done: 0, total: 0, filled: false })))
         return
       }
-      const filledDates = new Set((data ?? []).map(r => r.date))
+      const completedByDate = new Map<string, Set<string>>()
+      ;(data ?? []).forEach(r => {
+        const dt = r.date as string
+        const hid = r.habit_id as string
+        const set = completedByDate.get(dt) ?? new Set<string>()
+        set.add(hid)
+        completedByDate.set(dt, set)
+      })
       setWeekMarks(
         dates.map((date, i) => ({
           short: WEEK_SHORT_RU[i],
           date,
-          filled: filledDates.has(date),
+          total: habitList.filter(h => isHabitScheduledForDate(h, date)).length,
+          done: habitList.filter(h => isHabitScheduledForDate(h, date) && (completedByDate.get(date)?.has(h.id) ?? false)).length,
+          filled: (completedByDate.get(date)?.size ?? 0) > 0,
         })),
       )
     },
@@ -519,88 +585,128 @@ function useHabitsInternal(userId: string | undefined) {
   }, [userId, fetchHabits])
 
   const toggleHabit = useCallback(
-    async (habitId: string): Promise<HabitToggleResult> => {
+    async (habitId: string, dateStr?: string): Promise<HabitToggleResult> => {
       const habit = habits.find(h => h.id === habitId) ?? null
-      if (!habit) return { completed: false, habit: null, streakBonus: false }
-
       const todayStr = localYmd()
-      const isDone = todayLogs[habitId]
+      if (!habit) return { completed: false, habit: null, streakBonus: false, date: dateStr ?? todayStr, isRetro: false, xpAwarded: 0 }
+
+      const targetDate = dateStr ?? todayStr
+      const yesterdayStr = ymdMinusDays(todayStr, 1)
+      const isRetro = targetDate === yesterdayStr
+      const isToday = targetDate === todayStr
+      if (!isToday && !isRetro) {
+        return { completed: false, habit, streakBonus: false, date: targetDate, isRetro: false, xpAwarded: 0 }
+      }
+      if (!isHabitScheduledForDate(habit, targetDate)) {
+        return { completed: false, habit, streakBonus: false, date: targetDate, isRetro, xpAwarded: 0 }
+      }
+
+      const isDone = isToday ? todayLogs[habitId] : undefined
       const prevLogs = { ...todayLogs }
       const prevHabits = habits.map(h => ({ ...h }))
 
-      setTodayLogs(prev => ({ ...prev, [habitId]: !isDone }))
+      if (isToday) {
+        setTodayLogs(prev => ({ ...prev, [habitId]: !isDone }))
+      }
 
       try {
-        if (isDone) {
-          await supabase.from('habit_logs').delete().eq('habit_id', habitId).eq('date', todayStr)
+        const currentlyDone = isToday
+          ? Boolean(isDone)
+          : Boolean((await loadLogsForDate(targetDate, [habitId]))[habitId])
+
+        if (currentlyDone) {
+          await supabase.from('habit_logs').delete().eq('habit_id', habitId).eq('date', targetDate)
 
           const { data: prevRow } = await supabase
             .from('habit_logs')
             .select('date')
             .eq('habit_id', habitId)
             .eq('completed', true)
-            .neq('date', todayStr)
+            .neq('date', targetDate)
             .order('date', { ascending: false })
             .limit(1)
 
-          const newLastDone = prevRow?.[0]?.date ?? null
-          const newStreak = Math.max(0, habit.streak - 1)
-
-          await supabase
-            .from('habits')
-            .update({ streak: newStreak, last_done: newLastDone })
-            .eq('id', habitId)
-
-          const updated: Habit = { ...habit, streak: newStreak, last_done: newLastDone }
+          let updated: Habit
+          if (isRetro) {
+            const recomputed = await recomputeStreakFromLogs(habit)
+            await supabase
+              .from('habits')
+              .update({ streak: recomputed.streak, last_done: recomputed.last_done })
+              .eq('id', habitId)
+            updated = { ...habit, streak: recomputed.streak, last_done: recomputed.last_done }
+          } else {
+            const newLastDone = (prevRow?.[0]?.date as string | undefined) ?? null
+            const newStreak = Math.max(0, habit.streak - 1)
+            await supabase
+              .from('habits')
+              .update({ streak: newStreak, last_done: newLastDone })
+              .eq('id', habitId)
+            updated = { ...habit, streak: newStreak, last_done: newLastDone }
+          }
           setHabits(prev => prev.map(h => (h.id === habitId ? updated : h)))
           setCompletionCounts(prev => ({
             ...prev,
             [habitId]: Math.max(0, (prev[habitId] ?? 0) - 1),
           }))
           await fetchWeekMarks(habits.map(h => (h.id === habitId ? updated : h)))
-          return { completed: false, habit: updated, streakBonus: false }
+          if (isToday) {
+            setTodayLogs(prev => ({ ...prev, [habitId]: false }))
+          }
+          return { completed: false, habit: updated, streakBonus: false, date: targetDate, isRetro, xpAwarded: 0 }
         }
 
-        await supabase.from('habit_logs').upsert({ habit_id: habitId, date: todayStr, completed: true })
+        await supabase.from('habit_logs').upsert({ habit_id: habitId, date: targetDate, completed: true })
 
-        const y = new Date(todayStr + 'T12:00:00')
-        y.setDate(y.getDate() - 1)
-        const yStr = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, '0')}-${String(y.getDate()).padStart(2, '0')}`
-
-        let newStreak: number
-        if (habit.last_done === null) {
-          newStreak = 1
-        } else if (habit.last_done === yStr) {
-          newStreak = habit.streak + 1
-        } else if (habit.last_done === todayStr) {
-          newStreak = habit.streak
+        let updated: Habit
+        let streakBonus = false
+        if (isRetro) {
+          const recomputed = await recomputeStreakFromLogs(habit)
+          await supabase
+            .from('habits')
+            .update({ streak: recomputed.streak, last_done: recomputed.last_done })
+            .eq('id', habitId)
+          updated = { ...habit, streak: recomputed.streak, last_done: recomputed.last_done }
         } else {
-          newStreak = 1
+          const yStr = ymdMinusDays(todayStr, 1)
+          let newStreak: number
+          if (habit.last_done === null) {
+            newStreak = 1
+          } else if (habit.last_done === yStr) {
+            newStreak = habit.streak + 1
+          } else if (habit.last_done === todayStr) {
+            newStreak = habit.streak
+          } else {
+            newStreak = 1
+          }
+
+          await supabase
+            .from('habits')
+            .update({ streak: newStreak, last_done: todayStr })
+            .eq('id', habitId)
+
+          updated = { ...habit, streak: newStreak, last_done: todayStr }
+          streakBonus = newStreak > 0 && newStreak % 7 === 0
         }
 
-        await supabase
-          .from('habits')
-          .update({ streak: newStreak, last_done: todayStr })
-          .eq('id', habitId)
-
-        const updated: Habit = { ...habit, streak: newStreak, last_done: todayStr }
         setHabits(prev => prev.map(h => (h.id === habitId ? updated : h)))
-
-        const streakBonus = newStreak > 0 && newStreak % 7 === 0
         setCompletionCounts(prev => ({
           ...prev,
           [habitId]: (prev[habitId] ?? 0) + 1,
         }))
         await fetchWeekMarks(habits.map(h => (h.id === habitId ? updated : h)))
-        return { completed: true, habit: updated, streakBonus }
+        if (isToday) {
+          setTodayLogs(prev => ({ ...prev, [habitId]: true }))
+        }
+        const xpAwarded = isRetro ? 0 : 30
+        return { completed: true, habit: updated, streakBonus, date: targetDate, isRetro, xpAwarded }
       } catch (e) {
         console.error(e)
         setTodayLogs(prevLogs)
         setHabits(prevHabits)
-        return { completed: false, habit, streakBonus: false }
+        return { completed: false, habit, streakBonus: false, date: dateStr ?? localYmd(), isRetro: false, xpAwarded: 0 }
       }
     },
-    [habits, todayLogs, fetchWeekMarks],
+    [habits, todayLogs, fetchWeekMarks, loadLogsForDate],
   )
 
   const addHabit = useCallback(
