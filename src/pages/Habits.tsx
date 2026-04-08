@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import { useVisualViewportInset } from '@/hooks/useVisualViewportInset'
 import { useHabits, useCharacter, useFloatingXP } from '@/hooks/useLifeQuest'
-import { isHabitScheduledForDate, localYmd } from '@/lib/date'
+import { isHabitScheduledForDate, isoWeekdayFromYmd, localYmd } from '@/lib/date'
 import { canUse } from '@/lib/access'
 import PaywallModal from '@/components/PaywallModal'
 import { SPHERE_COLORS, SPHERE_LABELS, type Sphere } from '@/types'
@@ -60,6 +60,35 @@ function ymdMinusDays(ymd: string, days: number): string {
   return `${y}-${m}-${dd}`
 }
 
+function ymdToDate(ymd: string): Date {
+  const [y, m, d] = ymd.split('-').map(Number)
+  return new Date(y, (m ?? 1) - 1, d ?? 1)
+}
+
+function ymdFromDate(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
+}
+
+function isoWeekdayFromDate(d: Date): number {
+  const wd = d.getDay()
+  return wd === 0 ? 7 : wd
+}
+
+function monthStartEnd(ymd: string): { start: string; end: string } {
+  const d = ymdToDate(ymd)
+  const startDt = new Date(d.getFullYear(), d.getMonth(), 1)
+  const endDt = new Date(d.getFullYear(), d.getMonth() + 1, 0)
+  return { start: ymdFromDate(startDt), end: ymdFromDate(endDt) }
+}
+
+function monthLabelRu(ymd: string): string {
+  const d = ymdToDate(ymd)
+  return d.toLocaleString('ru-RU', { month: 'long', year: 'numeric' })
+}
+
 export default function Habits({ user }: HabitsProps) {
   const navigate = useNavigate()
   const { bottomInset, height: vvHeight } = useVisualViewportInset()
@@ -72,14 +101,31 @@ export default function Habits({ user }: HabitsProps) {
     toggleHabit,
     addHabit,
     updateHabit,
+    bulkUpdateHabits,
+    bulkDeleteHabits,
     deleteHabit,
     completionCounts,
     loadLogsForDate,
+    fetchRangeMarks,
     refetch: refetchHabits,
+    showArchived,
+    setShowArchived,
+    habitRetroDays,
+    updateHabitRetroDays,
   } = useHabits()
   const todayYmd = localYmd()
-  const yesterdayYmd = ymdMinusDays(todayYmd, 1)
+  const earliestToggleYmd = ymdMinusDays(todayYmd, habitRetroDays)
   const [viewDate, setViewDate] = useState(() => localYmd())
+  const [topMode, setTopMode] = useState<'week' | 'month'>('week')
+  const [monthCursor, setMonthCursor] = useState(() => localYmd())
+  const [monthMarks, setMonthMarks] = useState<Record<string, { done: number; total: number }>>({})
+  const [insights, setInsights] = useState<{
+    stabilityPct: number
+    totalPlanned: number
+    totalDone: number
+    overloadWeekday: number | null
+    weakWeekday: number | null
+  }>({ stabilityPct: 0, totalPlanned: 0, totalDone: 0, overloadWeekday: null, weakWeekday: null })
   const [viewLogs, setViewLogs] = useState<Record<string, boolean>>({})
   const { gainXP } = useCharacter(user.id)
   const { items: xpItems, show: showXP } = useFloatingXP()
@@ -89,6 +135,14 @@ export default function Habits({ user }: HabitsProps) {
   const [deleteTarget, setDeleteTarget] = useState<Habit | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [showPaywall, setShowPaywall] = useState(false)
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [showBulkSchedule, setShowBulkSchedule] = useState(false)
+  const [showBulkSphere, setShowBulkSphere] = useState(false)
+  const [showRetroSettings, setShowRetroSettings] = useState(false)
+  const [bulkWeekdays, setBulkWeekdays] = useState<number[]>([...ALL_WEEKDAYS])
+  const [bulkSphere, setBulkSphere] = useState<Sphere>('mind')
   const [newName, setNewName] = useState('')
   const [newSphere, setNewSphere] = useState<Sphere>('mind')
   const [newWeekdays, setNewWeekdays] = useState<number[]>([...ALL_WEEKDAYS])
@@ -113,8 +167,79 @@ export default function Habits({ user }: HabitsProps) {
     }
   }, [viewDate, todayYmd, loadLogsForDate, habits])
 
+  useEffect(() => {
+    if (topMode !== 'month') return
+    let cancelled = false
+    const { start, end } = monthStartEnd(monthCursor)
+    void fetchRangeMarks(habits, start, end).then(rows => {
+      if (cancelled) return
+      const next: Record<string, { done: number; total: number }> = {}
+      rows.forEach(r => { next[r.date] = { done: r.done, total: r.total } })
+      setMonthMarks(next)
+    })
+    return () => { cancelled = true }
+  }, [topMode, monthCursor, habits, fetchRangeMarks])
+
+  useEffect(() => {
+    let cancelled = false
+    const end = todayYmd
+    const start = ymdMinusDays(todayYmd, 27)
+    void fetchRangeMarks(habits, start, end).then(rows => {
+      if (cancelled) return
+      let totalPlanned = 0
+      let totalDone = 0
+      const byWd = new Map<number, { planned: number; done: number }>()
+      rows.forEach(r => {
+        totalPlanned += r.total
+        totalDone += r.done
+        const wd = isoWeekdayFromYmd(r.date)
+        const cur = byWd.get(wd) ?? { planned: 0, done: 0 }
+        cur.planned += r.total
+        cur.done += r.done
+        byWd.set(wd, cur)
+      })
+      const stabilityPct = totalPlanned === 0 ? 0 : Math.round((totalDone / totalPlanned) * 100)
+
+      let overloadWeekday: number | null = null
+      let maxPlanned = -1
+      let weakWeekday: number | null = null
+      let minRatio = Infinity
+
+      for (const [wd, v] of byWd.entries()) {
+        if (v.planned > maxPlanned) {
+          maxPlanned = v.planned
+          overloadWeekday = wd
+        }
+        if (v.planned > 0) {
+          const ratio = v.done / v.planned
+          if (ratio < minRatio) {
+            minRatio = ratio
+            weakWeekday = wd
+          }
+        }
+      }
+
+      setInsights({ stabilityPct, totalPlanned, totalDone, overloadWeekday, weakWeekday })
+    })
+    return () => { cancelled = true }
+  }, [habits, fetchRangeMarks, todayYmd])
+
   const visibleHabits = habits.filter(h => isHabitScheduledForDate(h, viewDate))
-  const canToggle = viewDate === todayYmd || viewDate === yesterdayYmd
+  const canToggle = viewDate >= earliestToggleYmd && viewDate <= todayYmd
+
+  function exitSelectMode() {
+    setSelectMode(false)
+    setSelectedIds(new Set())
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   async function quickAdd(name: string, sphere: Sphere, weekdays: number[]) {
     if (quickAddBusy) return
@@ -212,6 +337,38 @@ export default function Habits({ user }: HabitsProps) {
     }
   }
 
+  async function runBulkUpdate(patch: Parameters<typeof bulkUpdateHabits>[1]) {
+    if (bulkBusy) return
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    setBulkBusy(true)
+    try {
+      await bulkUpdateHabits(ids, patch)
+      exitSelectMode()
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  async function runBulkDelete() {
+    if (bulkBusy) return
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    const ok = window.confirm(`Удалить выбранные привычки (${ids.length}) и все их отметки?`)
+    if (!ok) return
+    setBulkBusy(true)
+    try {
+      await bulkDeleteHabits(ids)
+      exitSelectMode()
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
   function closeSheet() {
     setShowAdd(false)
     setEditingHabit(null)
@@ -226,13 +383,46 @@ export default function Habits({ user }: HabitsProps) {
         <button type="button" onClick={() => navigate(-1)} className="p-2 rounded-xl bg-white/5">
           <ArrowLeft size={20} />
         </button>
-        <h1 className="text-xl font-bold text-white flex-1">Привычки</h1>
+        <h1 className="text-xl font-bold text-white flex-1">
+          {selectMode ? `Выбрано: ${selectedIds.size}` : 'Привычки'}
+        </h1>
+        {!selectMode && (
+          <button
+            type="button"
+            onClick={() => setShowArchived(v => !v)}
+            className="px-3 py-2 rounded-xl text-xs font-semibold bg-white/5 text-gray-200"
+            aria-pressed={showArchived}
+            title={showArchived ? 'Скрыть архив' : 'Показать архив'}
+          >
+            {showArchived ? 'Архив: ON' : 'Архив'}
+          </button>
+        )}
+        {!selectMode && (
+          <button
+            type="button"
+            onClick={() => setShowRetroSettings(true)}
+            className="px-3 py-2 rounded-xl text-xs font-semibold bg-white/5 text-gray-200"
+            aria-label="Настроить окно ретро"
+            title="Окно ретро-отметок"
+          >
+            Ретро: {habitRetroDays}д
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+          className="px-3 py-2 rounded-xl text-xs font-semibold bg-white/5 text-gray-200"
+          aria-pressed={selectMode}
+        >
+          {selectMode ? 'Готово' : 'Выбрать'}
+        </button>
         <button
           type="button"
           onClick={openNewHabitSheet}
-          className="p-2 rounded-xl"
+          className="p-2 rounded-xl disabled:opacity-40"
           style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
           aria-label="Добавить привычку"
+          disabled={selectMode}
         >
           <Plus size={20} />
         </button>
@@ -240,63 +430,204 @@ export default function Habits({ user }: HabitsProps) {
 
       {/* Week Mon–Sun */}
       <div className="mx-4 mb-4 rounded-2xl p-4" style={{ background: '#0f0f1a', border: '1px solid rgba(255,255,255,0.08)' }}>
-        <p className="text-xs text-gray-500 mb-3">Неделя</p>
-        <div className="flex gap-1.5">
-          {weekMarks.map(mark => {
-            const isToday = mark.date === todayYmd
-            const isSelected = mark.date === viewDate
-            const weekLabel = mark.total === 0 ? 'нет привычек' : `${mark.done}/${mark.total}`
-            const fillPct = mark.total === 0 ? 0 : Math.round((mark.done / mark.total) * 100)
-            return (
-              <button
-                key={mark.date}
-                type="button"
-                onClick={() => setViewDate(mark.date)}
-                className="flex-1 flex flex-col items-center gap-1.5 min-w-0 rounded-lg py-1 -my-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/60"
-                aria-pressed={isSelected}
-                aria-label={`${mark.short}, ${mark.date}${isToday ? ', сегодня' : ''}${isSelected ? ', выбрано' : ''}, ${weekLabel}`}
-              >
-                <span
-                  className={`text-[10px] uppercase tracking-wide ${isToday ? 'text-violet-300' : 'text-gray-500'}`}
-                >
-                  {mark.short}
-                </span>
-                <div
-                  className="w-full h-2 rounded-full overflow-hidden"
-                  style={{
-                    background: 'rgba(255,255,255,0.08)',
-                    boxShadow: isSelected
-                      ? '0 0 0 2px rgba(127,119,221,0.75)'
-                      : isToday
-                        ? '0 0 0 1px rgba(127,119,221,0.5)'
-                        : undefined,
-                  }}
-                >
-                  <motion.div
-                    className="h-full rounded-full"
-                    initial={false}
-                    animate={{
-                      width: `${fillPct}%`,
-                      backgroundColor: mark.total === 0 ? 'transparent' : mark.done > 0 ? '#22c55e' : 'transparent',
-                    }}
-                    transition={{ duration: 0.35 }}
-                  />
-                </div>
-              </button>
-            )
-          })}
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs text-gray-500">{topMode === 'week' ? 'Неделя' : monthLabelRu(monthCursor)}</p>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              className={`text-xs px-3 py-1.5 rounded-lg ${topMode === 'week' ? 'bg-white/10 text-white' : 'bg-white/5 text-gray-300'}`}
+              onClick={() => setTopMode('week')}
+            >
+              Неделя
+            </button>
+            <button
+              type="button"
+              className={`text-xs px-3 py-1.5 rounded-lg ${topMode === 'month' ? 'bg-white/10 text-white' : 'bg-white/5 text-gray-300'}`}
+              onClick={() => { setTopMode('month'); setMonthCursor(viewDate) }}
+            >
+              Месяц
+            </button>
+          </div>
         </div>
+
+        {topMode === 'week' ? (
+          <div className="flex gap-1.5">
+            {weekMarks.map(mark => {
+              const isToday = mark.date === todayYmd
+              const isSelected = mark.date === viewDate
+              const weekLabel = mark.total === 0 ? 'нет привычек' : `${mark.done}/${mark.total}`
+              const fillPct = mark.total === 0 ? 0 : Math.round((mark.done / mark.total) * 100)
+              return (
+                <button
+                  key={mark.date}
+                  type="button"
+                  onClick={() => setViewDate(mark.date)}
+                  className="flex-1 flex flex-col items-center gap-1.5 min-w-0 rounded-lg py-1 -my-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/60"
+                  aria-pressed={isSelected}
+                  aria-label={`${mark.short}, ${mark.date}${isToday ? ', сегодня' : ''}${isSelected ? ', выбрано' : ''}, ${weekLabel}`}
+                >
+                  <span
+                    className={`text-[10px] uppercase tracking-wide ${isToday ? 'text-violet-300' : 'text-gray-500'}`}
+                  >
+                    {mark.short}
+                  </span>
+                  <div
+                    className="w-full h-2 rounded-full overflow-hidden"
+                    style={{
+                      background: 'rgba(255,255,255,0.08)',
+                      boxShadow: isSelected
+                        ? '0 0 0 2px rgba(127,119,221,0.75)'
+                        : isToday
+                          ? '0 0 0 1px rgba(127,119,221,0.5)'
+                          : undefined,
+                    }}
+                  >
+                    <motion.div
+                      className="h-full rounded-full"
+                      initial={false}
+                      animate={{
+                        width: `${fillPct}%`,
+                        backgroundColor: mark.total === 0 ? 'transparent' : mark.done > 0 ? '#22c55e' : 'transparent',
+                      }}
+                      transition={{ duration: 0.35 }}
+                    />
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between mb-3">
+              <button
+                type="button"
+                className="text-xs px-3 py-1.5 rounded-lg bg-white/5 text-gray-300"
+                onClick={() => {
+                  const d = ymdToDate(monthCursor)
+                  d.setMonth(d.getMonth() - 1)
+                  setMonthCursor(ymdFromDate(d))
+                }}
+              >
+                ←
+              </button>
+              <button
+                type="button"
+                className="text-xs px-3 py-1.5 rounded-lg bg-white/5 text-gray-300"
+                onClick={() => setMonthCursor(todayYmd)}
+              >
+                Сегодня
+              </button>
+              <button
+                type="button"
+                className="text-xs px-3 py-1.5 rounded-lg bg-white/5 text-gray-300"
+                onClick={() => {
+                  const d = ymdToDate(monthCursor)
+                  d.setMonth(d.getMonth() + 1)
+                  setMonthCursor(ymdFromDate(d))
+                }}
+              >
+                →
+              </button>
+            </div>
+            <div className="grid grid-cols-7 gap-1.5">
+              {(() => {
+                const d = ymdToDate(monthCursor)
+                const first = new Date(d.getFullYear(), d.getMonth(), 1)
+                const last = new Date(d.getFullYear(), d.getMonth() + 1, 0)
+                const firstIso = isoWeekdayFromDate(first) // 1..7
+                const padBefore = firstIso - 1
+                const cells: Array<{ ymd: string; inMonth: boolean }> = []
+                for (let i = 0; i < padBefore; i++) {
+                  const x = new Date(first)
+                  x.setDate(x.getDate() - (padBefore - i))
+                  cells.push({ ymd: ymdFromDate(x), inMonth: false })
+                }
+                for (let day = 1; day <= last.getDate(); day++) {
+                  const x = new Date(d.getFullYear(), d.getMonth(), day)
+                  cells.push({ ymd: ymdFromDate(x), inMonth: true })
+                }
+                while (cells.length % 7 !== 0) {
+                  const x = ymdToDate(cells[cells.length - 1]?.ymd ?? ymdFromDate(last))
+                  x.setDate(x.getDate() + 1)
+                  cells.push({ ymd: ymdFromDate(x), inMonth: false })
+                }
+                return cells.map(c => {
+                  const m = monthMarks[c.ymd] ?? { done: 0, total: 0 }
+                  const isSelected = c.ymd === viewDate
+                  const isToday = c.ymd === todayYmd
+                  const pct = m.total === 0 ? 0 : Math.round((m.done / m.total) * 100)
+                  const bg = m.total === 0 ? 'rgba(255,255,255,0.04)' : `rgba(34,197,94,${Math.min(0.45, 0.08 + pct / 300)})`
+                  return (
+                    <button
+                      key={c.ymd}
+                      type="button"
+                      onClick={() => { setViewDate(c.ymd); setTopMode('week') }}
+                      className="rounded-xl p-2 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/60"
+                      style={{
+                        background: bg,
+                        border: `1px solid ${
+                          isSelected ? 'rgba(127,119,221,0.65)' : isToday ? 'rgba(127,119,221,0.35)' : 'rgba(255,255,255,0.08)'
+                        }`,
+                        opacity: c.inMonth ? 1 : 0.45,
+                      }}
+                      aria-label={`${c.ymd}, ${m.total === 0 ? 'нет привычек' : `${m.done}/${m.total}`}`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className={`text-xs tabular-nums ${c.inMonth ? 'text-gray-200' : 'text-gray-500'}`}>
+                          {Number(c.ymd.split('-')[2])}
+                        </span>
+                        {m.total > 0 && (
+                          <span className="text-[10px] text-gray-200/80 tabular-nums">
+                            {m.done}/{m.total}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })
+              })()}
+            </div>
+          </>
+        )}
       </div>
+
+      {/* Insights */}
+      {!loading && habits.length > 0 && (
+        <div className="mx-4 mb-4 rounded-2xl p-4" style={{ background: '#0f0f1a', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <p className="text-xs text-gray-500 mb-3">Инсайты (28 дней)</p>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-2xl p-3 bg-white/5 border border-white/10">
+              <p className="text-[10px] text-gray-500">Стабильность</p>
+              <p className="text-lg font-bold text-white tabular-nums">{insights.stabilityPct}%</p>
+              <p className="text-[10px] text-gray-500 tabular-nums">{insights.totalDone}/{insights.totalPlanned}</p>
+            </div>
+            <div className="rounded-2xl p-3 bg-white/5 border border-white/10">
+              <p className="text-[10px] text-gray-500">Перегруз</p>
+              <p className="text-lg font-bold text-white">
+                {insights.overloadWeekday ? WEEKDAY_SHORT_RU[insights.overloadWeekday - 1] : '—'}
+              </p>
+              <p className="text-[10px] text-gray-500">самый плотный</p>
+            </div>
+            <div className="rounded-2xl p-3 bg-white/5 border border-white/10">
+              <p className="text-[10px] text-gray-500">Срыв</p>
+              <p className="text-lg font-bold text-white">
+                {insights.weakWeekday ? WEEKDAY_SHORT_RU[insights.weakWeekday - 1] : '—'}
+              </p>
+              <p className="text-[10px] text-gray-500">самый слабый</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Habits list */}
       <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pb-8 space-y-3">
-        {!loading && viewDate !== todayYmd && viewDate !== yesterdayYmd && (
+        {!loading && !canToggle && (
           <div
             className="rounded-xl px-3 py-2 text-sm text-gray-200/95 mb-2 flex items-center justify-between gap-3"
             style={{ background: 'rgba(127,119,221,0.12)', border: '1px solid rgba(127,119,221,0.22)' }}
           >
             <p className="leading-snug">
-              Этот день — для просмотра. Отмечать можно только сегодня и вчера.
+              Этот день — для просмотра. Отмечать можно сегодня{habitRetroDays > 0 ? ` и ещё за последние ${habitRetroDays} дн.` : '.'}
             </p>
             <button
               type="button"
@@ -307,13 +638,13 @@ export default function Habits({ user }: HabitsProps) {
             </button>
           </div>
         )}
-        {!loading && viewDate === yesterdayYmd && (
+        {!loading && canToggle && viewDate !== todayYmd && (
           <div
             className="rounded-xl px-3 py-2 text-sm text-gray-200/95 mb-2 flex items-center justify-between gap-3"
             style={{ background: 'rgba(34,197,94,0.10)', border: '1px solid rgba(34,197,94,0.20)' }}
           >
             <p className="leading-snug">
-              Можно отметить вчера, чтобы закрыть хвост — без лишнего давления.
+              Можно отметить прошлые дни в окне ретро — без лишнего давления.
             </p>
             <button
               type="button"
@@ -401,16 +732,44 @@ export default function Habits({ user }: HabitsProps) {
             const done = viewLogs[habit.id] ?? false
             const color = SPHERE_COLORS[habit.sphere as Sphere] ?? '#7F77DD'
             const SphereIc = SPHERE_ICON[habit.sphere as Sphere] ?? Brain
+            const isSelected = selectedIds.has(habit.id)
             return (
               <motion.div
                 key={habit.id}
-                className="flex items-center gap-3 rounded-2xl pl-3 pr-2 py-3 min-h-[56px]"
+                className="flex items-center gap-3 rounded-2xl pl-3 pr-2 py-3 min-h-[56px] cursor-pointer"
                 style={{
-                  background: done ? `${color}12` : 'rgba(255,255,255,0.04)',
-                  border: `1px solid ${done ? color + '33' : 'rgba(255,255,255,0.08)'}`,
+                  background: selectMode
+                    ? isSelected
+                      ? 'rgba(127,119,221,0.16)'
+                      : 'rgba(255,255,255,0.04)'
+                    : done
+                      ? `${color}12`
+                      : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${
+                    selectMode
+                      ? isSelected
+                        ? 'rgba(127,119,221,0.55)'
+                        : 'rgba(255,255,255,0.08)'
+                      : done
+                        ? color + '33'
+                        : 'rgba(255,255,255,0.08)'
+                  }`,
                 }}
                 layout
+                role={selectMode ? 'checkbox' : undefined}
+                aria-checked={selectMode ? isSelected : undefined}
+                onClick={() => (selectMode ? toggleSelected(habit.id) : navigate(`/habits/${habit.id}`))}
               >
+                {selectMode && (
+                  <div className="w-5 h-5 rounded-md border flex items-center justify-center flex-shrink-0"
+                    style={{
+                      borderColor: isSelected ? '#7F77DD' : 'rgba(255,255,255,0.18)',
+                      background: isSelected ? 'rgba(127,119,221,0.55)' : 'transparent',
+                    }}
+                  >
+                    {isSelected && <Check size={14} className="text-white" strokeWidth={3} />}
+                  </div>
+                )}
                 <div
                   className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
                   style={{ background: `${color}22`, color }}
@@ -435,17 +794,19 @@ export default function Habits({ user }: HabitsProps) {
                 <div className="flex items-center gap-0.5 shrink-0">
                   <button
                     type="button"
-                    onClick={() => openEditHabit(habit)}
-                    className="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                    onClick={e => { e.stopPropagation(); openEditHabit(habit) }}
+                    className="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-40"
                     aria-label="Изменить привычку"
+                    disabled={selectMode}
                   >
                     <Pencil size={18} strokeWidth={2} />
                   </button>
                   <button
                     type="button"
-                    onClick={() => setDeleteTarget(habit)}
-                    className="p-2 rounded-xl text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                    onClick={e => { e.stopPropagation(); setDeleteTarget(habit) }}
+                    className="p-2 rounded-xl text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
                     aria-label="Удалить привычку"
+                    disabled={selectMode}
                   >
                     <Trash2 size={18} strokeWidth={2} />
                   </button>
@@ -456,13 +817,16 @@ export default function Habits({ user }: HabitsProps) {
                   aria-checked={done}
                   aria-disabled={!canToggle}
                   disabled={!canToggle}
-                  onClick={() => canToggle && handleToggle(habit.id)}
+                  onClick={e => {
+                    e.stopPropagation()
+                    if (!selectMode && canToggle) void handleToggle(habit.id)
+                  }}
                   className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 border disabled:opacity-40 disabled:cursor-not-allowed"
                   style={{
                     background: done ? color : 'rgba(255,255,255,0.06)',
                     borderColor: done ? color : 'rgba(255,255,255,0.12)',
                   }}
-                  whileTap={canToggle ? { scale: 0.92 } : undefined}
+                  whileTap={!selectMode && canToggle ? { scale: 0.92 } : undefined}
                 >
                   {done && <Check size={22} className="text-white" strokeWidth={2.5} />}
                 </motion.button>
@@ -471,6 +835,265 @@ export default function Habits({ user }: HabitsProps) {
           })
         )}
       </div>
+
+      {/* Bulk actions bar */}
+      <AnimatePresence>
+        {selectMode && selectedIds.size > 0 && (
+          <motion.div
+            className="fixed left-0 right-0 z-[85] px-4"
+            style={{ bottom: bottomInset + 96 }}
+            initial={{ y: 30, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 30, opacity: 0 }}
+          >
+            <div
+              className="mx-auto max-w-md rounded-2xl p-3 flex items-center gap-2"
+              style={{ background: '#12121f', border: '1px solid rgba(255,255,255,0.12)' }}
+            >
+              <button
+                type="button"
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-white/10 disabled:opacity-40"
+                onClick={() => { setBulkSphere('mind'); setShowBulkSphere(true) }}
+                disabled={bulkBusy}
+              >
+                Сфера
+              </button>
+              <button
+                type="button"
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-white/10 disabled:opacity-40"
+                onClick={() => { setBulkWeekdays([...ALL_WEEKDAYS]); setShowBulkSchedule(true) }}
+                disabled={bulkBusy}
+              >
+                Дни
+              </button>
+              <button
+                type="button"
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-white/10 disabled:opacity-40"
+                onClick={() => void runBulkUpdate({ archived_at: new Date().toISOString() })}
+                disabled={bulkBusy}
+              >
+                В архив
+              </button>
+              <button
+                type="button"
+                className="py-2.5 px-3 rounded-xl text-sm font-semibold text-white bg-red-600/80 disabled:opacity-40"
+                onClick={() => void runBulkDelete()}
+                disabled={bulkBusy}
+                aria-label="Удалить выбранные"
+              >
+                <Trash2 size={18} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Bulk sphere modal */}
+      <AnimatePresence>
+        {showBulkSphere && (
+          <motion.div
+            className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-black/75"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => !bulkBusy && setShowBulkSphere(false)}
+          >
+            <motion.div
+              className="w-full max-w-sm rounded-3xl p-6"
+              style={{ background: '#12121f', border: '1px solid rgba(255,255,255,0.1)' }}
+              initial={{ scale: 0.94, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.94, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+            >
+              <h2 className="text-lg font-semibold text-white">Сменить сферу</h2>
+              <p className="text-sm text-gray-400 mt-2">Применится к {selectedIds.size} привычкам.</p>
+              <div className="grid grid-cols-2 gap-2 mt-4">
+                {SPHERES.map(s => {
+                  const active = bulkSphere === s
+                  const col = SPHERE_COLORS[s]
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setBulkSphere(s)}
+                      className="py-3 px-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
+                      style={{
+                        background: active ? col + '28' : 'rgba(255,255,255,0.05)',
+                        border: `2px solid ${active ? col : 'transparent'}`,
+                        color: active ? col : '#9ca3af',
+                        boxShadow: active ? `0 0 20px ${col}22` : undefined,
+                      }}
+                    >
+                      {SPHERE_LABELS[s]}
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="flex gap-3 mt-6">
+                <button
+                  type="button"
+                  className="flex-1 py-3 rounded-2xl font-medium text-gray-300 bg-white/10"
+                  onClick={() => setShowBulkSphere(false)}
+                  disabled={bulkBusy}
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  className="flex-1 py-3 rounded-2xl font-semibold text-white disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
+                  onClick={() => void runBulkUpdate({ sphere: bulkSphere })}
+                  disabled={bulkBusy}
+                >
+                  Применить
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Bulk schedule modal */}
+      <AnimatePresence>
+        {showBulkSchedule && (
+          <motion.div
+            className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-black/75"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => !bulkBusy && setShowBulkSchedule(false)}
+          >
+            <motion.div
+              className="w-full max-w-sm rounded-3xl p-6"
+              style={{ background: '#12121f', border: '1px solid rgba(255,255,255,0.1)' }}
+              initial={{ scale: 0.94, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.94, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+            >
+              <h2 className="text-lg font-semibold text-white">Сменить дни</h2>
+              <p className="text-sm text-gray-400 mt-2">Применится к {selectedIds.size} привычкам.</p>
+              <div className="flex flex-wrap gap-2 mt-4 mb-3">
+                <button
+                  type="button"
+                  onClick={() => setBulkWeekdays([...ALL_WEEKDAYS])}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-gray-300"
+                >
+                  Все дни
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkWeekdays([1, 2, 3, 4, 5])}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-gray-300"
+                >
+                  Пн–Пт
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkWeekdays([6, 7])}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-gray-300"
+                >
+                  Выходные
+                </button>
+              </div>
+              <div className="grid grid-cols-7 gap-1.5 mb-2">
+                {ALL_WEEKDAYS.map(d => {
+                  const active = bulkWeekdays.includes(d)
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => setBulkWeekdays(prev => toggleWeekday(prev, d))}
+                      className="py-2.5 rounded-xl text-xs font-semibold transition-all"
+                      style={{
+                        background: active ? '#534AB7' : 'rgba(255,255,255,0.06)',
+                        color: active ? '#fff' : '#9ca3af',
+                      }}
+                    >
+                      {WEEKDAY_SHORT_RU[d - 1]}
+                    </button>
+                  )
+                })}
+              </div>
+              {bulkWeekdays.length === 0 && (
+                <p className="text-xs text-amber-500/90 mb-2">Выбери хотя бы один день</p>
+              )}
+              <div className="flex gap-3 mt-6">
+                <button
+                  type="button"
+                  className="flex-1 py-3 rounded-2xl font-medium text-gray-300 bg-white/10"
+                  onClick={() => setShowBulkSchedule(false)}
+                  disabled={bulkBusy}
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  className="flex-1 py-3 rounded-2xl font-semibold text-white disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
+                  onClick={() => void runBulkUpdate({ weekdays: bulkWeekdays })}
+                  disabled={bulkBusy || bulkWeekdays.length === 0}
+                >
+                  Применить
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Retro settings modal */}
+      <AnimatePresence>
+        {showRetroSettings && (
+          <motion.div
+            className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-black/75"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowRetroSettings(false)}
+          >
+            <motion.div
+              className="w-full max-w-sm rounded-3xl p-6"
+              style={{ background: '#12121f', border: '1px solid rgba(255,255,255,0.1)' }}
+              initial={{ scale: 0.94, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.94, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+            >
+              <h2 className="text-lg font-semibold text-white">Окно ретро-отметок</h2>
+              <p className="text-sm text-gray-400 mt-2 leading-relaxed">
+                Сколько дней назад можно отмечать привычки. За ретро-дни XP не начисляется.
+              </p>
+              <div className="grid grid-cols-3 gap-2 mt-4">
+                {[0, 1, 7].map(v => (
+                  <button
+                    key={v}
+                    type="button"
+                    className="py-3 rounded-2xl text-sm font-semibold"
+                    style={{
+                      background: habitRetroDays === v ? 'rgba(127,119,221,0.35)' : 'rgba(255,255,255,0.06)',
+                      border: `1px solid ${habitRetroDays === v ? 'rgba(127,119,221,0.65)' : 'rgba(255,255,255,0.10)'}`,
+                      color: habitRetroDays === v ? '#fff' : '#d1d5db',
+                    }}
+                    onClick={() => void updateHabitRetroDays(v)}
+                  >
+                    {v}д
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="mt-5 w-full py-3 rounded-2xl font-semibold text-white"
+                style={{ background: 'linear-gradient(135deg, #534AB7, #7F77DD)' }}
+                onClick={() => setShowRetroSettings(false)}
+              >
+                Готово
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Floating XP */}
       <AnimatePresence>

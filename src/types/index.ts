@@ -5,6 +5,8 @@ export interface User {
   plan: 'free' | 'trial' | 'pro'
   /** Окончание оплаченной подписки Pro (ISO); null пока не было оплаты с датой */
   pro_until?: string | null
+  /** How many days back habit check-ins are allowed (0=strict, 1=yesterday, 7=week). */
+  habit_retro_days?: number | null
   trial_end: string | null
   trial_notified?: boolean | null
   referral_code: string
@@ -58,6 +60,10 @@ export interface Habit {
   weekdays: number[] | null
   streak: number
   last_done: string | null
+  /** Soft-delete/hidden from default lists. ISO timestamp or null. */
+  archived_at?: string | null
+  /** Per-user ordering (lower comes first). */
+  sort_order?: number | null
   created_at: string
 }
 

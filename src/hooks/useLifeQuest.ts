@@ -331,6 +331,12 @@ export type WeekDayMark = {
   filled: boolean
 }
 
+export type DayMark = {
+  date: string
+  done: number
+  total: number
+}
+
 function initialWeekMarks(): WeekDayMark[] {
   const dates = getWeekMonSunDates()
   return dates.map((date, i) => ({ short: WEEK_SHORT_RU[i], date, done: 0, total: 0, filled: false }))
@@ -343,6 +349,7 @@ const HABIT_COLUMNS_MINIMAL =
   'id, user_id, name, sphere, frequency, streak, last_done'
 
 const HABIT_COLUMNS_LEGACY = `${HABIT_COLUMNS_MINIMAL}, weekdays`
+const HABIT_COLUMNS_V2 = `${HABIT_COLUMNS_LEGACY}, archived_at, sort_order, created_at`
 
 function normalizeHabitRow(row: Habit): Habit {
   const w = row.weekdays
@@ -352,6 +359,8 @@ function normalizeHabitRow(row: Habit): Habit {
     ...row,
     weekdays,
     created_at: row.created_at ?? '',
+    archived_at: row.archived_at ?? null,
+    sort_order: row.sort_order ?? null,
   }
 }
 
@@ -410,6 +419,8 @@ function useHabitsInternal(userId: string | undefined) {
   const [weekMarks, setWeekMarks] = useState<WeekDayMark[]>(initialWeekMarks)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [showArchived, setShowArchived] = useState(false)
+  const [habitRetroDays, setHabitRetroDays] = useState(1)
 
   const fetchSeq = useRef(0)
 
@@ -454,6 +465,45 @@ function useHabitsInternal(userId: string | undefined) {
     [],
   )
 
+  const fetchRangeMarks = useCallback(async (habitList: Habit[], startYmd: string, endYmd: string): Promise<DayMark[]> => {
+    if (habitList.length === 0) return []
+    const ids = habitList.map(h => h.id)
+    const { data, error } = await supabase
+      .from('habit_logs')
+      .select('date, habit_id')
+      .in('habit_id', ids)
+      .eq('completed', true)
+      .gte('date', startYmd)
+      .lte('date', endYmd)
+    if (error) {
+      console.error('range marks:', error)
+      return []
+    }
+    const completedByDate = new Map<string, Set<string>>()
+    ;(data ?? []).forEach(r => {
+      const dt = r.date as string
+      const hid = r.habit_id as string
+      const set = completedByDate.get(dt) ?? new Set<string>()
+      set.add(hid)
+      completedByDate.set(dt, set)
+    })
+
+    const out: DayMark[] = []
+    const cur = new Date(startYmd + 'T12:00:00')
+    const end = new Date(endYmd + 'T12:00:00')
+    while (cur <= end) {
+      const y = cur.getFullYear()
+      const m = String(cur.getMonth() + 1).padStart(2, '0')
+      const d = String(cur.getDate()).padStart(2, '0')
+      const date = `${y}-${m}-${d}`
+      const total = habitList.filter(h => isHabitScheduledForDate(h, date)).length
+      const done = habitList.filter(h => isHabitScheduledForDate(h, date) && (completedByDate.get(date)?.has(h.id) ?? false)).length
+      out.push({ date, done, total })
+      cur.setDate(cur.getDate() + 1)
+    }
+    return out
+  }, [])
+
   const loadLogsForDate = useCallback(async (dateStr: string, habitIds: string[]) => {
     if (!userId || habitIds.length === 0) return {}
     const { data, error: qErr } = await supabase
@@ -472,6 +522,22 @@ function useHabitsInternal(userId: string | undefined) {
     return logs
   }, [userId])
 
+  const loadHabitCompletionsInRange = useCallback(async (habitId: string, startYmd: string, endYmd: string) => {
+    if (!userId) return new Set<string>()
+    const { data, error } = await supabase
+      .from('habit_logs')
+      .select('date')
+      .eq('habit_id', habitId)
+      .eq('completed', true)
+      .gte('date', startYmd)
+      .lte('date', endYmd)
+    if (error) {
+      console.error('habit history:', error)
+      return new Set<string>()
+    }
+    return new Set((data ?? []).map(r => r.date as string))
+  }, [userId])
+
   const fetchHabits = useCallback(async () => {
     if (!userId) return
     const seq = ++fetchSeq.current
@@ -479,25 +545,40 @@ function useHabitsInternal(userId: string | undefined) {
     setLoading(true)
     setError(null)
     try {
+      // Best-effort: read retro window setting (defaults to 1 if missing).
+      try {
+        const { data: settings } = await supabase
+          .from('users')
+          .select('habit_retro_days')
+          .eq('id', userId)
+          .maybeSingle()
+        const v = Number(settings?.habit_retro_days)
+        if (Number.isFinite(v) && v >= 0 && v <= 30) setHabitRetroDays(v)
+      } catch {
+        // ignore (schema cache / column missing)
+      }
+
       let habitsRes = await supabase
         .from('habits')
         .select('*')
         .eq('user_id', userId)
+        .order('sort_order', { ascending: true, nullsFirst: false })
         .order('id')
       if (seq !== fetchSeq.current) return
       if (habitsRes.error) {
         const hint = supabaseErrorMessage(habitsRes.error, '')
-        const looksLikeWeekdays = /weekdays/i.test(hint) || /schema cache/i.test(hint)
-        if (looksLikeWeekdays) {
+        const looksLikeColumns = /weekdays|archived_at|sort_order|created_at/i.test(hint) || /schema cache/i.test(hint)
+        if (looksLikeColumns) {
           habitsRes = await supabase
             .from('habits')
-            .select(HABIT_COLUMNS_LEGACY)
+            .select(HABIT_COLUMNS_V2)
             .eq('user_id', userId)
+            .order('sort_order', { ascending: true, nullsFirst: false })
             .order('id')
           if (seq !== fetchSeq.current) return
           if (habitsRes.error) {
             const h2 = supabaseErrorMessage(habitsRes.error, '')
-            if (/weekdays/i.test(h2) || /schema cache/i.test(h2)) {
+            if (/archived_at|sort_order|created_at/i.test(h2) || /schema cache/i.test(h2)) {
               habitsRes = await supabase
                 .from('habits')
                 .select(HABIT_COLUMNS_MINIMAL)
@@ -509,7 +590,8 @@ function useHabitsInternal(userId: string | undefined) {
         }
       }
       if (habitsRes.error) throw habitsRes.error
-      const list = (habitsRes.data ?? []).map(normalizeHabitRow)
+      const listAll = (habitsRes.data ?? []).map(normalizeHabitRow)
+      const list = showArchived ? listAll : listAll.filter(h => !h.archived_at)
       setHabits(list)
 
       const ids = list.map(h => h.id)
@@ -558,7 +640,7 @@ function useHabitsInternal(userId: string | undefined) {
       if (seq !== fetchSeq.current) return
       setLoading(false)
     }
-  }, [userId, fetchWeekMarks])
+  }, [userId, fetchWeekMarks, showArchived])
 
   useEffect(() => {
     void fetchHabits()
@@ -591,10 +673,14 @@ function useHabitsInternal(userId: string | undefined) {
       if (!habit) return { completed: false, habit: null, streakBonus: false, date: dateStr ?? todayStr, isRetro: false, xpAwarded: 0 }
 
       const targetDate = dateStr ?? todayStr
-      const yesterdayStr = ymdMinusDays(todayStr, 1)
-      const isRetro = targetDate === yesterdayStr
       const isToday = targetDate === todayStr
-      if (!isToday && !isRetro) {
+      const earliest = ymdMinusDays(todayStr, habitRetroDays)
+      const targetMs = new Date(targetDate + 'T12:00:00').getTime()
+      const earliestMs = new Date(earliest + 'T12:00:00').getTime()
+      const todayMs = new Date(todayStr + 'T12:00:00').getTime()
+      const withinWindow = targetMs >= earliestMs && targetMs <= todayMs
+      const isRetro = !isToday && withinWindow
+      if (!withinWindow) {
         return { completed: false, habit, streakBonus: false, date: targetDate, isRetro: false, xpAwarded: 0 }
       }
       if (!isHabitScheduledForDate(habit, targetDate)) {
@@ -706,7 +792,7 @@ function useHabitsInternal(userId: string | undefined) {
         return { completed: false, habit, streakBonus: false, date: dateStr ?? localYmd(), isRetro: false, xpAwarded: 0 }
       }
     },
-    [habits, todayLogs, fetchWeekMarks, loadLogsForDate],
+    [habits, todayLogs, fetchWeekMarks, loadLogsForDate, habitRetroDays],
   )
 
   const addHabit = useCallback(
@@ -759,6 +845,83 @@ function useHabitsInternal(userId: string | undefined) {
     [userId, fetchWeekMarks, fetchHabits],
   )
 
+  const bulkUpdateHabits = useCallback(async (habitIds: string[], patch: Partial<Pick<Habit, 'sphere' | 'weekdays' | 'archived_at' | 'sort_order'>>) => {
+    if (!userId) return
+    if (habitIds.length === 0) return
+    const { error } = await supabase
+      .from('habits')
+      .update(patch)
+      .in('id', habitIds)
+      .eq('user_id', userId)
+    if (error) throw error
+    void fetchHabits()
+  }, [userId, fetchHabits])
+
+  const bulkDeleteHabits = useCallback(async (habitIds: string[]) => {
+    if (!userId) return
+    if (habitIds.length === 0) return
+    const { error: logErr } = await supabase.from('habit_logs').delete().in('habit_id', habitIds)
+    if (logErr) throw logErr
+    const { error: habErr } = await supabase
+      .from('habits')
+      .delete()
+      .in('id', habitIds)
+      .eq('user_id', userId)
+    if (habErr) throw habErr
+    void fetchHabits()
+  }, [userId, fetchHabits])
+
+  const updateHabitRetroDays = useCallback(async (days: number) => {
+    if (!userId) return
+    const clamped = Math.max(0, Math.min(30, Math.floor(days)))
+    setHabitRetroDays(clamped)
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({ habit_retro_days: clamped })
+        .eq('id', userId)
+      if (error) throw error
+    } catch (e) {
+      console.error('update habit retro days:', e)
+      // Best-effort revert by refetching settings on next fetchHabits.
+    }
+  }, [userId])
+
+  const getHabitReminder = useCallback(async (habitId: string): Promise<{ enabled: boolean } | null> => {
+    if (!userId) return null
+    const { data, error } = await supabase
+      .from('habit_reminders')
+      .select('enabled')
+      .eq('habit_id', habitId)
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (error) {
+      console.error('get habit reminder:', error)
+      return null
+    }
+    if (!data) return { enabled: false }
+    return { enabled: (data as any).enabled !== false }
+  }, [userId])
+
+  const setHabitReminderEnabled = useCallback(async (habitId: string, enabled: boolean) => {
+    if (!userId) return
+    const { data: u } = await supabase.from('users').select('tg_id').eq('id', userId).maybeSingle()
+    const tgId = Number((u as any)?.tg_id)
+    if (!Number.isFinite(tgId)) throw new Error('tg_id missing')
+    const { error } = await supabase
+      .from('habit_reminders')
+      .upsert({
+        user_id: userId,
+        habit_id: habitId,
+        tg_id: tgId,
+        enabled,
+        // Default schedule: 10:00 MSK = 07:00 UTC
+        fire_hour_utc: 7,
+        fire_minute_utc: 0,
+      }, { onConflict: 'habit_id' })
+    if (error) throw error
+  }, [userId])
+
   const deleteHabit = useCallback(
     async (habitId: string) => {
       if (!userId) return
@@ -797,11 +960,21 @@ function useHabitsInternal(userId: string | undefined) {
     weekMarks,
     loading,
     error,
+    showArchived,
+    setShowArchived,
+    habitRetroDays,
+    updateHabitRetroDays,
+    getHabitReminder,
+    setHabitReminderEnabled,
     toggleHabit,
     addHabit,
     updateHabit,
+    bulkUpdateHabits,
+    bulkDeleteHabits,
     deleteHabit,
     loadLogsForDate,
+    loadHabitCompletionsInRange,
+    fetchRangeMarks,
     refetch: fetchHabits,
   }
 }

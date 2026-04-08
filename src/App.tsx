@@ -9,6 +9,7 @@ import Dashboard from './pages/Dashboard'
 import Journal from './pages/Journal'
 import NewEntry from './pages/NewEntry'
 import Habits from './pages/Habits'
+import HabitDetails from './pages/HabitDetails'
 import Quests from './pages/Quests'
 import Chat from './pages/Chat'
 import Referral from './pages/Referral'
@@ -144,6 +145,7 @@ function AppRoutes() {
         <Route path="/journal" element={protect(<Journal user={user} />)} />
         <Route path="/journal/new" element={protect(<NewEntry user={user} />)} />
         <Route path="/habits" element={protect(<Habits user={user} />)} />
+        <Route path="/habits/:id" element={protect(<HabitDetails />)} />
         <Route path="/quests" element={protect(<Quests user={user} />)} />
         <Route path="/chat" element={protect(<Chat user={user} />)} />
         <Route path="/referral" element={protect(<Referral user={user} />)} />

@@ -51,6 +51,15 @@ function jsonResponse(body: unknown, init?: ResponseInit): Response {
   })
 }
 
+function ymdMinusDays(ymd: string, days: number): string {
+  const d = new Date(ymd + 'T12:00:00Z')
+  d.setUTCDate(d.getUTCDate() - days)
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(d.getUTCDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
+}
+
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -149,6 +158,68 @@ async function handleTelegramUpdate(update: TgUpdate): Promise<Response> {
 
     if (cbData === 'menu:quests') {
       await sendTelegramMessage(cbChatId, 'Открой приложение, чтобы посмотреть квесты.', {
+        parseMode: null,
+        buttons: [
+          [{ text: 'Открыть приложение', web_app: { url: appUrl } }],
+          [{ text: '⬅️ Меню', callback_data: 'menu:root' }],
+        ],
+      })
+      return jsonResponse({ ok: true }, { status: 200 })
+    }
+
+    if (cbData.startsWith('habit:done:')) {
+      const parts = cbData.split(':')
+      const habitId = parts[2] ?? ''
+      const ymd = parts[3] ?? ''
+      if (!habitId || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+        await sendTelegramMessage(cbChatId, 'Не смог прочитать дату привычки. Открой приложение.', {
+          parseMode: null,
+          buttons: [
+            [{ text: 'Открыть приложение', web_app: { url: appUrl } }],
+            [{ text: '⬅️ Меню', callback_data: 'menu:root' }],
+          ],
+        })
+        return jsonResponse({ ok: true }, { status: 200 })
+      }
+
+      // Resolve user by tg_id.
+      const { data: user } = await supabase.from('users').select('id').eq('tg_id', cbChatId).maybeSingle()
+      const userId = (user as any)?.id as string | undefined
+      if (!userId) {
+        await sendTelegramMessage(cbChatId, 'Не нашёл пользователя. Открой приложение через /start.', {
+          parseMode: null,
+          buttons: [[{ text: 'Открыть приложение', web_app: { url: appUrl } }]],
+        })
+        return jsonResponse({ ok: true }, { status: 200 })
+      }
+
+      // Check habit ownership.
+      const { data: habit } = await supabase
+        .from('habits')
+        .select('id, user_id, streak, last_done')
+        .eq('id', habitId)
+        .maybeSingle()
+      if (!habit?.id || (habit as any).user_id !== userId) {
+        await sendTelegramMessage(cbChatId, 'Эта привычка недоступна.', { parseMode: null, buttons: mainMenuButtons(appUrl) })
+        return jsonResponse({ ok: true }, { status: 200 })
+      }
+
+      // Idempotent mark as done.
+      await supabase.from('habit_logs').upsert({ habit_id: habitId, date: ymd, completed: true })
+
+      // Update streak/last_done (best-effort, today-like logic relative to ymd).
+      const lastDone = ((habit as any).last_done as string | null) ?? null
+      const streak = Number((habit as any).streak ?? 0) || 0
+      const yStr = ymdMinusDays(ymd, 1)
+      let newStreak: number
+      if (lastDone === null) newStreak = 1
+      else if (lastDone === yStr) newStreak = streak + 1
+      else if (lastDone === ymd) newStreak = streak
+      else newStreak = 1
+
+      await supabase.from('habits').update({ streak: newStreak, last_done: ymd }).eq('id', habitId)
+
+      await sendTelegramMessage(cbChatId, 'Готово. Отметил.', {
         parseMode: null,
         buttons: [
           [{ text: 'Открыть приложение', web_app: { url: appUrl } }],

@@ -67,6 +67,76 @@ async function processReminders(nowIso: string): Promise<{ remindersSent: number
   return { remindersSent }
 }
 
+function isoWeekdayUtc(d: Date): number {
+  const wd = d.getUTCDay()
+  return wd === 0 ? 7 : wd
+}
+
+async function sendTgWithButtons(chatId: number, text: string, buttons: any): Promise<TgSendResult> {
+  const token = getBotToken()
+  if (!token) return { ok: false }
+  if (!Number.isFinite(chatId)) return { ok: false }
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        disable_web_page_preview: true,
+        reply_markup: { inline_keyboard: buttons },
+      }),
+    })
+    return { ok: res.ok, status: res.status }
+  } catch {
+    return { ok: false }
+  }
+}
+
+async function processHabitReminders(now: Date): Promise<{ habitRemindersSent: number }> {
+  const appUrl = getAppUrl()
+  const nowHour = now.getUTCHours()
+  const nowMin = now.getUTCMinutes()
+  const ymd = now.toISOString().slice(0, 10) // UTC calendar day
+  const isoWd = isoWeekdayUtc(now)
+
+  // Fire reminders that are scheduled for <= current time and not yet fired today.
+  // With a frequent cron, this behaves like a simple scheduler.
+  const { data: due } = await supabase
+    .from('habit_reminders')
+    .select('id, tg_id, habit_id, user_id, weekdays, fire_hour_utc, fire_minute_utc, last_fired_ymd')
+    .eq('enabled', true)
+    .or(`fire_hour_utc.lt.${nowHour},and(fire_hour_utc.eq.${nowHour},fire_minute_utc.lte.${nowMin})`)
+    .limit(100)
+
+  let habitRemindersSent = 0
+  for (const r of due ?? []) {
+    const last = String((r as any).last_fired_ymd ?? '')
+    if (last === ymd) continue
+    const days = ((r as any).weekdays as number[] | null) ?? [1, 2, 3, 4, 5, 6, 7]
+    if (!days.includes(isoWd)) continue
+
+    const tgId = Number((r as any).tg_id)
+    if (!Number.isFinite(tgId)) continue
+    const habitId = String((r as any).habit_id ?? '')
+    if (!habitId) continue
+
+    const text = 'Пора сделать ритуал.'
+    const buttons = [
+      [{ text: '✅ Отметить', callback_data: `habit:done:${habitId}:${ymd}` }],
+      [{ text: 'Открыть приложение', url: appUrl }],
+    ]
+    const res = await sendTgWithButtons(tgId, text, buttons)
+    if (res.ok) habitRemindersSent++
+
+    await supabase
+      .from('habit_reminders')
+      .update({ last_fired_ymd: ymd, updated_at: new Date().toISOString() })
+      .eq('id', (r as any).id)
+  }
+  return { habitRemindersSent }
+}
+
 async function processQuestNotifications(): Promise<{ questNotified: number }> {
   // Best-effort polling: pick recent quests and dedup via bot_quest_notified.
   const sinceIso = new Date(Date.now() - 15 * 60 * 1000).toISOString()
@@ -196,9 +266,11 @@ export default async function handler(req: Request): Promise<Response> {
     return new Response('Method not allowed', { status: 405 })
   }
 
-  const nowIso = new Date().toISOString()
-  const [{ remindersSent }, { questNotified }, { broadcastJobsDone, broadcastMessagesSent }] = await Promise.all([
+  const now = new Date()
+  const nowIso = now.toISOString()
+  const [{ remindersSent }, { habitRemindersSent }, { questNotified }, { broadcastJobsDone, broadcastMessagesSent }] = await Promise.all([
     processReminders(nowIso),
+    processHabitReminders(now),
     processQuestNotifications(),
     processBroadcasts(),
   ])
@@ -207,6 +279,7 @@ export default async function handler(req: Request): Promise<Response> {
     JSON.stringify({
       ok: true,
       remindersSent,
+      habitRemindersSent,
       questNotified,
       broadcastJobsDone,
       broadcastMessagesSent,
