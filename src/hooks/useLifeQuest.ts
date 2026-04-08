@@ -915,9 +915,9 @@ function useHabitsInternal(userId: string | undefined) {
         habit_id: habitId,
         tg_id: tgId,
         enabled,
-        // Default schedule: 10:00 MSK = 07:00 UTC
+        // Hobby Vercel cron: bot-tick runs daily at 07:05 UTC (~10:05 MSK).
         fire_hour_utc: 7,
-        fire_minute_utc: 0,
+        fire_minute_utc: 5,
       }, { onConflict: 'habit_id' })
     if (error) throw error
   }, [userId])

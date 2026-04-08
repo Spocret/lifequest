@@ -202,7 +202,7 @@ export default function HabitDetails() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-white">Напоминание</p>
-              <p className="text-xs text-gray-500 mt-0.5">По умолчанию: 10:00 МСК (через бот)</p>
+              <p className="text-xs text-gray-500 mt-0.5">В бесплатном Vercel: 10:05 МСК (через бот)</p>
             </div>
             <button
               type="button"
